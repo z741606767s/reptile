@@ -1,10 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from aiokafka.admin import AIOKafkaAdminClient
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import TopicAlreadyExistsError
 from aiokafka.admin import NewTopic
 from config.settings import settings
-from main import app
 import logging
 
 # 配置日志
@@ -17,11 +16,10 @@ router = APIRouter(
 )
 
 
-@app.get("/kafka/topics")
-async def list_kafka_topics():
-    """列出所有Kafka主题"""
-    if not hasattr(app.state, 'kafka_available') or not app.state.kafka_available:
-        return {"error": "Kafka不可用"}
+@router.get("/kafka/topics")
+async def list_kafka_topics(request: Request):
+    if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:
+        return {"message": "Kafka 不可用."}
 
     try:
         # 使用KafkaAdminClient获取主题列表
@@ -37,11 +35,10 @@ async def list_kafka_topics():
         return {"error": f"获取主题列表失败: {e}"}
 
 
-@app.post("/kafka/topics/{topic_name}")
-async def create_kafka_topic(topic_name: str, partitions: int = 1, replication_factor: int = 1):
-    """创建Kafka主题"""
-    if not hasattr(app.state, 'kafka_available') or not app.state.kafka_available:
-        return {"error": "Kafka不可用"}
+@router.post("/kafka/topics/{topic_name}")
+async def create_kafka_topic(request: Request, topic_name: str, partitions: int = 1, replication_factor: int = 1):
+    if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:
+        return {"message": "Kafka 不可用."}
 
     try:
         # 使用KafkaAdminClient创建主题
@@ -66,10 +63,11 @@ async def create_kafka_topic(topic_name: str, partitions: int = 1, replication_f
         return {"error": f"创建主题失败: {e}"}
 
 
-async def create_topics_if_not_exist():
+@router.post("/kafka/topics/create")
+async def create_topics_if_not_exist(request: Request):
     """创建所有需要的主题（如果不存在）"""
-    if not hasattr(app.state, 'kafka_available') or not app.state.kafka_available:
-        return
+    if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:
+        return {"message": "Kafka 不可用."}
 
     try:
         admin_client = AIOKafkaAdminClient(
@@ -101,5 +99,6 @@ async def create_topics_if_not_exist():
             logger.info(f"已创建主题: {[t.name for t in topics_to_create]}")
 
         await admin_client.close()
+        return {"message": "已创建主题."}
     except Exception as e:
         logger.error(f"创建主题时出错: {e}")
