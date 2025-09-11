@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # Kafka配置
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     KAFKA_TOPIC_PREFIX: str = os.getenv("KAFKA_TOPIC_PREFIX", "fastapi_")
+    # Kafka主题配置
+    KAFKA_NUM_PARTITIONS = int(os.getenv("KAFKA_NUM_PARTITIONS", "3"))
+    KAFKA_REPLICATION_FACTOR = int(os.getenv("KAFKA_REPLICATION_FACTOR", "1"))
+    # Kafka重试配置
+    KAFKA_CONNECT_RETRIES = int(os.getenv("KAFKA_CONNECT_RETRIES", "3"))
+    KAFKA_CONNECT_DELAY = int(os.getenv("KAFKA_CONNECT_DELAY", "5"))
 
     # ZooKeeper配置
     ZOOKEEPER_HOSTS: str = os.getenv("ZOOKEEPER_HOSTS", "localhost:2181")

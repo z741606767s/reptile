@@ -13,7 +13,7 @@ from database.redis import redis_client
 from database.mongodb import mongodb
 from database.kafka_producer import kafka_producer
 from database.kafka_consumer import kafka_consumer
-from database import register_kafka_handlers
+from database import register_kafka_handlers, KafkaTopic
 import logging
 
 # 设置日志
@@ -41,6 +41,25 @@ async def graceful_shutdown():
         except Exception as e:
             logger.error(f"关闭处理函数执行出错: {e}")
     logger.info("所有资源已关闭")
+
+
+async def initialize_kafka_topics():
+    """初始化Kafka主题"""
+    if not hasattr(app.state, 'kafka_available') or not app.state.kafka_available:
+        return
+
+    try:
+        # 获取所有主题
+        from database.kafka_topics import KafkaTopic
+        topics = [topic.with_prefix(settings.KAFKA_TOPIC_PREFIX) for topic in KafkaTopic]
+
+        # 确保所有主题都存在
+        for topic in topics:
+            await kafka_producer.ensure_topic_exists(topic)
+
+        logger.info(f"已初始化Kafka主题: {topics}")
+    except Exception as e:
+        logger.error(f"初始化Kafka主题时出错: {e}")
 
 
 @asynccontextmanager
@@ -75,8 +94,9 @@ async def lifespan(app: FastAPI):
     app.state.kafka_available = kafka_available
 
     # 如果Kafka可用，注册处理器并启动消费者
-    if kafka_available:
+    if hasattr(app.state, 'kafka_available') and app.state.kafka_available:
         try:
+            await initialize_kafka_topics()
             await register_kafka_handlers()
             await kafka_consumer.start_consuming()
         except Exception as e:

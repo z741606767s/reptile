@@ -26,12 +26,22 @@ class KafkaConsumer:
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
             enable_auto_commit=True,
             auto_commit_interval_ms=1000,
-            auto_offset_reset='earliest'
+            auto_offset_reset='earliest',
+            # 允许自动创建主题
+            metadata_max_age_ms=30000
         )
 
         # 订阅所有主题
         topics = [topic.with_prefix(settings.KAFKA_TOPIC_PREFIX) for topic in KafkaTopic]
+
+        # 启动消费者
         await self.consumer.start()
+
+        # 确保所有主题都存在
+        for topic in topics:
+            await self.ensure_topic_exists(topic)
+
+        # 订阅主题
         self.consumer.subscribe(topics)
 
         logger.info(f"Kafka消费者已连接，订阅主题: {topics}")
@@ -111,6 +121,29 @@ class KafkaConsumer:
         # 启动消费任务
         self._consuming_task = asyncio.create_task(self.consume_messages())
         logger.info("Kafka消费者已开始消费消息")
+
+    async def ensure_topic_exists(self, topic_name: str):
+        """确保主题存在"""
+        try:
+            # 获取集群元数据
+            cluster_metadata = await self.consumer.client.cluster()
+            # 检查主题是否存在
+            if topic_name not in cluster_metadata.topics():
+                logger.info(f"主题 '{topic_name}' 不存在，等待自动创建...")
+                # 创建一个临时生产者来发送测试消息
+                from aiokafka import AIOKafkaProducer
+                producer = AIOKafkaProducer(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                )
+                await producer.start()
+                try:
+                    await producer.send(topic_name, {"test": "message"})
+                    logger.info(f"已发送测试消息到主题 '{topic_name}' 以触发创建")
+                finally:
+                    await producer.stop()
+        except Exception as e:
+            logger.error(f"检查主题存在性时出错: {e}")
 
 
 # 全局Kafka消费者实例
