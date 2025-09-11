@@ -13,6 +13,7 @@ from database.redis import redis_client
 from database.mongodb import mongodb
 from database.kafka_producer import kafka_producer
 from database.kafka_consumer import kafka_consumer
+from database import register_kafka_handlers
 import logging
 
 # 设置日志
@@ -57,30 +58,30 @@ async def lifespan(app: FastAPI):
     await mongodb.connect()
 
     # Kafka 连接（带重试机制）
-    # kafka_available = True
-    # try:
-    #     await kafka_producer.connect_with_retry(retries=5, delay=5)
-    # except Exception as e:
-    #     logger.error(f"Kafka生产者连接失败: {e}")
-    #     kafka_available = False
-    #
-    # try:
-    #     await kafka_consumer.connect_with_retry(retries=5, delay=5)
-    # except Exception as e:
-    #     logger.error(f"Kafka消费者连接失败: {e}")
-    #     kafka_available = False
-    #
-    # # 设置应用状态
-    # app.state.kafka_available = kafka_available
-    #
-    # # 如果Kafka可用，注册处理器并启动消费者
-    # if kafka_available:
-    #     try:
-    #         await register_kafka_handlers()
-    #         await kafka_consumer.start_consuming()
-    #     except Exception as e:
-    #         logger.error(f"Kafka消费者启动失败: {e}")
-    #         app.state.kafka_available = False
+    kafka_available = True
+    try:
+        await kafka_producer.connect_with_retry(retries=5, delay=5)
+    except Exception as e:
+        logger.error(f"Kafka生产者连接失败: {e}")
+        kafka_available = False
+
+    try:
+        await kafka_consumer.connect_with_retry(retries=5, delay=5)
+    except Exception as e:
+        logger.error(f"Kafka消费者连接失败: {e}")
+        kafka_available = False
+
+    # 设置应用状态
+    app.state.kafka_available = kafka_available
+
+    # 如果Kafka可用，注册处理器并启动消费者
+    if kafka_available:
+        try:
+            await register_kafka_handlers()
+            await kafka_consumer.start_consuming()
+        except Exception as e:
+            logger.error(f"Kafka消费者启动失败: {e}")
+            app.state.kafka_available = False
 
     yield
 
