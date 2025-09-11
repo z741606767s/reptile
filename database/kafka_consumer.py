@@ -1,4 +1,3 @@
-# database/kafka_consumer.py
 from aiokafka import AIOKafkaConsumer
 import asyncio
 import json
@@ -36,6 +35,21 @@ class KafkaConsumer:
         self.consumer.subscribe(topics)
 
         logger.info(f"Kafka消费者已连接，订阅主题: {topics}")
+
+    async def connect_with_retry(self, retries=5, delay=5):
+        """带重试机制的连接方法"""
+        for attempt in range(retries):
+            try:
+                await self.connect()
+                print(f"Kafka消费者连接成功(尝试 {attempt + 1}/{retries})")
+                return True
+            except Exception as e:
+                if attempt < retries - 1:
+                    print(f"Kafka连接尝试 {attempt + 1}/{retries} 失败: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"所有Kafka连接尝试均失败: {e}")
+                    raise
 
     async def disconnect(self):
         """断开Kafka连接"""

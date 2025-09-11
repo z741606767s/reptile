@@ -1,7 +1,7 @@
-# main.py
+import uvicorn
 import asyncio
-import signal
 import sys
+import signal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -13,7 +13,11 @@ from database.redis import redis_client
 from database.mongodb import mongodb
 from database.kafka_producer import kafka_producer
 from database.kafka_consumer import kafka_consumer
-from database import register_kafka_handlers
+import logging
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 全局变量，用于存储关闭函数
 _shutdown_handlers = []
@@ -26,13 +30,16 @@ def register_shutdown_handler(handler):
 
 async def graceful_shutdown():
     """优雅关闭所有资源"""
-    print("开始优雅关闭...")
+    logger.info("开始优雅关闭...")
     for handler in reversed(_shutdown_handlers):
         try:
-            await handler()
+            if asyncio.iscoroutinefunction(handler):
+                await handler()
+            else:
+                handler()
         except Exception as e:
-            print(f"关闭处理函数执行出错: {e}")
-    print("所有资源已关闭")
+            logger.error(f"关闭处理函数执行出错: {e}")
+    logger.info("所有资源已关闭")
 
 
 @asynccontextmanager
@@ -48,14 +55,32 @@ async def lifespan(app: FastAPI):
     await mysql_db.connect()
     await redis_client.connect()
     await mongodb.connect()
-    await kafka_producer.connect()
-    await kafka_consumer.connect()
 
-    # 注册Kafka消息处理器
-    await register_kafka_handlers()
-
-    # 启动Kafka消费者
-    await kafka_consumer.start_consuming()
+    # Kafka 连接（带重试机制）
+    # kafka_available = True
+    # try:
+    #     await kafka_producer.connect_with_retry(retries=5, delay=5)
+    # except Exception as e:
+    #     logger.error(f"Kafka生产者连接失败: {e}")
+    #     kafka_available = False
+    #
+    # try:
+    #     await kafka_consumer.connect_with_retry(retries=5, delay=5)
+    # except Exception as e:
+    #     logger.error(f"Kafka消费者连接失败: {e}")
+    #     kafka_available = False
+    #
+    # # 设置应用状态
+    # app.state.kafka_available = kafka_available
+    #
+    # # 如果Kafka可用，注册处理器并启动消费者
+    # if kafka_available:
+    #     try:
+    #         await register_kafka_handlers()
+    #         await kafka_consumer.start_consuming()
+    #     except Exception as e:
+    #         logger.error(f"Kafka消费者启动失败: {e}")
+    #         app.state.kafka_available = False
 
     yield
 
@@ -96,8 +121,12 @@ async def health_check():
     mysql_status = "connected" if mysql_db.pool else "disconnected"
     redis_status = "connected" if redis_client.redis else "disconnected"
     mongo_status = "connected" if mongodb.client else "disconnected"
-    kafka_producer_status = "connected" if kafka_producer.producer else "disconnected"
-    kafka_consumer_status = "running" if kafka_consumer.is_running else "stopped"
+
+    # 检查Kafka状态
+    kafka_producer_status = "connected" if hasattr(app.state,
+                                                   'kafka_available') and app.state.kafka_available else "disconnected"
+    kafka_consumer_status = "running" if hasattr(app.state,
+                                                 'kafka_available') and app.state.kafka_available else "stopped"
 
     return {
         "status": "healthy",
@@ -109,21 +138,23 @@ async def health_check():
     }
 
 
-# 注册信号处理，用于优雅关闭
-def handle_signal(signum, frame):
-    print(f"收到信号 {signum}，开始优雅关闭...")
-    asyncio.create_task(graceful_shutdown())
+# 优雅关闭处理
+async def handle_shutdown():
+    """处理优雅关闭"""
+    await graceful_shutdown()
     sys.exit(0)
 
 
-# 注册信号处理（仅当直接运行主脚本时）
-if __name__ == "__main__":
-    import signal
+def handle_signal(signum, frame):
+    """信号处理函数"""
+    logger.info(f"收到信号 {signum}，开始优雅关闭...")
+    # 创建异步任务来处理关闭
+    asyncio.create_task(handle_shutdown())
 
+
+if __name__ == "__main__":
+    # 注册信号处理
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
-
-if __name__ == "__main__":
-    import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

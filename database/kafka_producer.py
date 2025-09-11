@@ -1,4 +1,4 @@
-# database/kafka_producer.py
+import asyncio
 from aiokafka import AIOKafkaProducer
 import json
 from config.settings import settings
@@ -18,6 +18,21 @@ class KafkaProducer:
         )
         await self.producer.start()
         print("Kafka生产者已连接")
+
+    async def connect_with_retry(self, retries=5, delay=5):
+        """带重试机制的连接方法"""
+        for attempt in range(retries):
+            try:
+                await self.connect()
+                print(f"Kafka生产者连接成功(尝试 {attempt + 1}/{retries})")
+                return True
+            except Exception as e:
+                if attempt < retries - 1:
+                    print(f"Kafka连接尝试 {attempt + 1}/{retries} 失败: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"所有Kafka连接尝试均失败: {e}")
+                    raise
 
     async def disconnect(self):
         """断开Kafka连接"""

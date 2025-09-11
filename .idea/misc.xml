@@ -3,8 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="reptile" />
   </component>
-  <component name="KubernetesApiPersistence">{}</component>
-  <component name="KubernetesApiProvider">{
-  &quot;isMigrated&quot;: true
-}</component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="reptile" project-jdk-type="Python SDK" />
 </project>
