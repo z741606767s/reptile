@@ -90,7 +90,7 @@ class KafkaProducer:
 
         # 获取集群元数据，这会触发主题的自动创建
         try:
-            cluster_metadata = await self.producer.client.cluster()
+            cluster_metadata = self.producer.client.cluster
             # 检查主题是否存在
             if topic_name not in cluster_metadata.topics():
                 logger.info(f"主题 '{topic_name}' 不存在，等待自动创建...")

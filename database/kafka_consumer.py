@@ -126,9 +126,9 @@ class KafkaConsumer:
         """确保主题存在"""
         try:
             # 获取集群元数据
-            cluster_metadata = await self.consumer.client.cluster()
+            cluster_metadata = await self.consumer.topics()
             # 检查主题是否存在
-            if topic_name not in cluster_metadata.topics():
+            if topic_name not in cluster_metadata:
                 logger.info(f"主题 '{topic_name}' 不存在，等待自动创建...")
                 # 创建一个临时生产者来发送测试消息
                 from aiokafka import AIOKafkaProducer
