@@ -1,6 +1,13 @@
 from redis.asyncio import Redis
 from config.settings import settings
 from typing import Optional
+import logging
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 
 class RedisClient:

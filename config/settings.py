@@ -11,6 +11,27 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     API_V2_STR: str = "/api/v2"
 
+    # 调试配置
+    DEBUG: bool = os.getenv("DEBUG", False)
+    # 日志配置
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # 日志文件配置
+    LOG_FILE: str = os.getenv("LOG_FILE", "app.log")
+    # 日志文件大小配置
+    LOG_FILE_SIZE: int = os.getenv("LOG_FILE_SIZE", 1024 * 1024 * 100)
+    # 日志文件最大字节配置
+    LOG_FILE_MAX_BYTES: int = os.getenv("LOG_FILE_MAX_BYTES", 1024 * 1024 * 100)
+    # 日志文件备份配置
+    LOG_FILE_BACKUP: int = os.getenv("LOG_FILE_BACKUP", 5)
+    # 日志格式配置
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # 日志日期格式配置
+    LOG_DATE_FORMAT: str = os.getenv("LOG_DATE_FORMAT", "%Y-%m-%d %H:%M:%S")
+    # 日志文件编码配置
+    LOG_FILE_ENCODING: str = os.getenv("LOG_FILE_ENCODING", "utf-8")
+    # 日志文件模式配置
+    LOG_FILE_MODE: str = os.getenv("LOG_FILE_MODE", "a")
+
     # 数据库配置
     MYSQL_HOST: str = os.getenv("MYSQL_HOST", "localhost")
     MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", 3306))

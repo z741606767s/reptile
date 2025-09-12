@@ -7,7 +7,9 @@ from config.settings import settings
 import logging
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()

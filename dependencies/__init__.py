@@ -1,8 +1,17 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
+from config import settings
 from database.redis import redis_client
 from database.kafka_producer import kafka_producer
+import logging
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
+
 
 # 模拟用户验证
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")

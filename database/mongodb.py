@@ -1,5 +1,12 @@
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from config.settings import settings
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 
 class MongoDB:

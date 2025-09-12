@@ -1,6 +1,14 @@
+import logging
 from fastapi import APIRouter, Depends
+from config import settings
 from dependencies import get_current_admin_user, get_redis
 import redis
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

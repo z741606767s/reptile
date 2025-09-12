@@ -1,3 +1,4 @@
+from services.reptile import reptile_service
 from .kafka_consumer import kafka_consumer
 from .kafka_topics import KafkaTopic
 from services.email_service import email_service
@@ -40,9 +41,41 @@ async def register_kafka_handlers():
         logger.info(f"处理审计日志: {message}")
         # 在实际应用中，这里可能会将审计日志存储到专门的日志系统或数据库
 
+    async def handle_item_created(message):
+        """处理 ITEM_CREATED 消息"""
+        try:
+            # 这里可以添加处理逻辑，例如发送通知、更新缓存等
+            logger.info(f"处理 ITEM_CREATED 消息: {message}")
+
+            # 示例：保存到数据库
+            # url = message.get('url')
+            # data = message.get('data')
+            # if url and data:
+            #     await reptile_service.save_crawl_result(url, data)
+
+        except Exception as e:
+            logger.error(f"处理 ITEM_CREATED 消息时出错: {e}")
+
+    async def handle_crawl_results(message):
+        """处理 CRAWL_RESULTS 消息"""
+        try:
+            # 这里可以添加处理逻辑，例如发送通知、更新缓存等
+            logger.info(f"处理 CRAWL_RESULTS 消息: {message}")
+
+            # 示例：保存到数据库
+            url = message.get('url')
+            data = message.get('data')
+            if url and data:
+                await reptile_service.save_crawl_result(url, data)
+
+        except Exception as e:
+            logger.error(f"处理 CRAWL_RESULTS 消息时出错: {e}")
+
     # 注册处理器
+    kafka_consumer.register_handler(KafkaTopic.ITEM_CREATED, handle_item_created)
     kafka_consumer.register_handler(KafkaTopic.USER_CREATED, handle_user_created)
     kafka_consumer.register_handler(KafkaTopic.NOTIFICATION, handle_notification)
     kafka_consumer.register_handler(KafkaTopic.AUDIT_LOG, handle_audit_log)
+    kafka_consumer.register_handler(KafkaTopic.CRAWL_RESULTS, handle_crawl_results)
 
     logger.info("Kafka消息处理器注册完成")

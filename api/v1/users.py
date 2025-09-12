@@ -1,13 +1,19 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
-
 from starlette import status
-
+from config import settings
 from models.user import User, UserCreate, UserUpdate
 from dependencies import get_current_user, get_mysql, get_kafka
 from database.kafka_topics import KafkaTopic
 import aiomysql
 from utils.response import response_util
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     responses={404: {"description": "Not found"}},

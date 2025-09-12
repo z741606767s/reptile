@@ -2,6 +2,14 @@ from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from .response import response_util
 import traceback
+from config import settings
+import logging
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 
 async def validation_exception_handler(

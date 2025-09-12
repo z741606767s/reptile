@@ -8,7 +8,7 @@ from starlette import status
 from starlette.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from config.settings import settings
+from config import settings
 from api.v1 import router as v1_router
 from api.v2 import router as v2_router
 from database.mysql import mysql_db
@@ -59,13 +59,11 @@ async def initialize_kafka_topics():
     try:
         # 获取所有主题
         from database.kafka_topics import KafkaTopic
-        topics = [topic.with_prefix(settings.KAFKA_TOPIC_PREFIX) for topic in KafkaTopic]
-
+        # 获取所有 KafkaTopic 枚举成员
+        topics = list(KafkaTopic)
         # 确保所有主题都存在
-        for topic in topics:
-            await kafka_producer.ensure_topic_exists(topic)
-
-        logger.info(f"已初始化Kafka主题: {topics}")
+        await kafka_producer.ensure_topics_exist(topics)
+        logger.info(f"已初始化Kafka主题: {[t.with_prefix(settings.KAFKA_TOPIC_PREFIX) for t in topics]}")
     except Exception as e:
         logger.error(f"初始化Kafka主题时出错: {e}")
 
@@ -104,13 +102,17 @@ async def lifespan(app: FastAPI):
     # 如果Kafka可用，注册处理器并启动消费者
     if hasattr(app.state, 'kafka_available') and app.state.kafka_available:
         try:
+            # 初始化Kafka主题
             await initialize_kafka_topics()
+            # 注册Kafka消息处理器
             await register_kafka_handlers()
+            # 启动Kafka消费者
             await kafka_consumer.start_consuming()
         except Exception as e:
             logger.error(f"Kafka消费者启动失败: {e}")
             app.state.kafka_available = False
 
+    # 启动应用
     yield
 
     # 关闭所有资源

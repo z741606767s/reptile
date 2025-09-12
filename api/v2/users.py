@@ -1,6 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from typing import List
+from config import settings
 from models.user import User, UserCreate
+import logging
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
+
 
 # 创建 v2 用户路由组
 router = APIRouter(
