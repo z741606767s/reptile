@@ -3,6 +3,9 @@ import asyncio
 import sys
 import signal
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from starlette import status
+from starlette.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config.settings import settings
@@ -13,7 +16,12 @@ from database.redis import redis_client
 from database.mongodb import mongodb
 from database.kafka_producer import kafka_producer
 from database.kafka_consumer import kafka_consumer
-from database import register_kafka_handlers, KafkaTopic
+from database import register_kafka_handlers
+from utils.response.exception_handlers import (
+    validation_exception_handler,
+    http_exception_handler,
+    global_exception_handler
+)
 import logging
 
 # 设置日志
@@ -23,12 +31,12 @@ logger = logging.getLogger(__name__)
 # 全局变量，用于存储关闭函数
 _shutdown_handlers = []
 
-
+# ====== 关闭处理函数 ======
 def register_shutdown_handler(handler):
     """注册关闭处理函数"""
     _shutdown_handlers.append(handler)
 
-
+# ====== 优雅关闭处理 ======
 async def graceful_shutdown():
     """优雅关闭所有资源"""
     logger.info("开始优雅关闭...")
@@ -42,7 +50,7 @@ async def graceful_shutdown():
             logger.error(f"关闭处理函数执行出错: {e}")
     logger.info("所有资源已关闭")
 
-
+# ====== 初始化Kafka主题 ======
 async def initialize_kafka_topics():
     """初始化Kafka主题"""
     if not hasattr(app.state, 'kafka_available') or not app.state.kafka_available:
@@ -61,7 +69,7 @@ async def initialize_kafka_topics():
     except Exception as e:
         logger.error(f"初始化Kafka主题时出错: {e}")
 
-
+# ====== 应用生命周期 ======
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 注册关闭处理函数
@@ -108,7 +116,7 @@ async def lifespan(app: FastAPI):
     # 关闭所有资源
     await graceful_shutdown()
 
-
+# ====== 应用实例 ======
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=settings.PROJECT_DESCRIPTION,
@@ -117,7 +125,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 设置CORS
+# ====== 注册异常处理器 ======
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(status.HTTP_400_BAD_REQUEST, http_exception_handler)
+app.add_exception_handler(status.HTTP_401_UNAUTHORIZED, http_exception_handler)
+app.add_exception_handler(status.HTTP_403_FORBIDDEN, http_exception_handler)
+app.add_exception_handler(status.HTTP_404_NOT_FOUND, http_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, global_exception_handler)
+
+# ====== 设置CORS ======
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -126,16 +143,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 引入v1和v2路由
+# ====== 引入v1和v2路由 ======
 app.include_router(v1_router, prefix=settings.API_V1_STR)
 app.include_router(v2_router, prefix=settings.API_V2_STR)
 
-
+# ====== 根路由 ======
 @app.get("/")
 async def root():
     return {"message": "Welcome to FastAPI FullStack Demo with v1 and v2 APIs"}
 
-
+# ====== 健康检查路由 ======
 @app.get("/health")
 async def health_check():
     # 检查所有数据库连接状态
@@ -159,13 +176,13 @@ async def health_check():
     }
 
 
-# 优雅关闭处理
+# ====== 优雅关闭处理 ======
 async def handle_shutdown():
     """处理优雅关闭"""
     await graceful_shutdown()
     sys.exit(0)
 
-
+# ====== 信号处理 ======
 def handle_signal(signum, frame):
     """信号处理函数"""
     logger.info(f"收到信号 {signum}，开始优雅关闭...")

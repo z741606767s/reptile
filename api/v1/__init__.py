@@ -1,9 +1,10 @@
 from fastapi import APIRouter
-from . import kafka, users, admin  # 导入所有路由模块
+from . import reptile, kafka, users, admin  # 导入所有路由模块
 
 router = APIRouter()
 
 # 引入子路由，可以在这里添加统一的前缀或标签
+router.include_router(reptile.router, prefix="/reptile", tags=["reptile"])
 router.include_router(kafka.router, prefix="/kafka", tags=["kafka"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(admin.router, prefix="/admin", tags=["admin"])

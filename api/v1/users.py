@@ -1,13 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
+
+from starlette import status
+
 from models.user import User, UserCreate, UserUpdate
 from dependencies import get_current_user, get_mysql, get_kafka
 from database.kafka_topics import KafkaTopic
 import aiomysql
+from utils.response import response_util
 
 router = APIRouter(
-    prefix="/users",
-    tags=["users"],
     responses={404: {"description": "Not found"}},
 )
 
@@ -19,12 +21,17 @@ async def get_users(
         cursor: aiomysql.Cursor = Depends(get_mysql)
 ):
     """获取用户列表"""
-    await cursor.execute(
-        "SELECT id, name, email, is_active, created_at, updated_at FROM users LIMIT %s OFFSET %s",
-        (limit, skip)
-    )
-    users = await cursor.fetchall()
-    return [dict(user) for user in users]
+    try:
+        await cursor.execute(
+            "SELECT id, name, email, is_active, created_at, updated_at FROM users LIMIT %s OFFSET %s",
+            (limit, skip)
+        )
+        users = await cursor.fetchall()
+        user_list = [dict(user) for user in users]
+    except Exception as e:
+        return response_util.error(f"获取用户列表失败: {str(e)}", status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return response_util.success(user_list, "获取用户列表成功", status.HTTP_200_OK)
 
 
 @router.get("/{user_id}", response_model=User)

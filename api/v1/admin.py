@@ -1,11 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from dependencies import get_current_admin_user, get_redis
 import redis
 
-router = APIRouter(
-    prefix="/admin",
-    tags=["admin"],
-)
+router = APIRouter()
 
 
 @router.get("/stats")

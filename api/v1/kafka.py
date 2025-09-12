@@ -10,13 +10,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/kafka",
-    tags=["kafka"],
-)
+router = APIRouter()
 
 
-@router.get("/kafka/topics")
+@router.get("/topics")
 async def list_kafka_topics(request: Request):
     if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:
         return {"message": "Kafka 不可用."}
@@ -35,7 +32,7 @@ async def list_kafka_topics(request: Request):
         return {"error": f"获取主题列表失败: {e}"}
 
 
-@router.post("/kafka/topics/{topic_name}")
+@router.post("/topics/{topic_name}")
 async def create_kafka_topic(request: Request, topic_name: str, partitions: int = 1, replication_factor: int = 1):
     if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:
         return {"message": "Kafka 不可用."}
@@ -63,7 +60,7 @@ async def create_kafka_topic(request: Request, topic_name: str, partitions: int 
         return {"error": f"创建主题失败: {e}"}
 
 
-@router.post("/kafka/topics/create")
+@router.post("/topics/create")
 async def create_topics_if_not_exist(request: Request):
     """创建所有需要的主题（如果不存在）"""
     if not hasattr(request.app.state, "kafka_available") or not request.app.state.kafka_available:

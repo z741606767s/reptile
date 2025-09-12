@@ -25,10 +25,12 @@ class KafkaConsumer:
             group_id="fastapi_consumer_group",
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
             enable_auto_commit=True,
-            auto_commit_interval_ms=1000,
+            auto_commit_interval_ms=5000,  # 增加自动提交间隔
             auto_offset_reset='earliest',
-            # 允许自动创建主题
-            metadata_max_age_ms=30000
+            metadata_max_age_ms=30000, # 允许自动创建主题
+            session_timeout_ms=30000,  # 增加会话超时时间（默认10秒）
+            heartbeat_interval_ms=3000,  # 设置心跳间隔（默认3秒）
+            max_poll_interval_ms=300000,  # 增加最大轮询间隔（默认5分钟）
         )
 
         # 订阅所有主题
@@ -89,29 +91,61 @@ class KafkaConsumer:
     async def consume_messages(self):
         """消费消息"""
         self.is_running = True
-        try:
-            async for msg in self.consumer:
-                if not self.is_running:
-                    break
+        retry_count = 0
+        max_retries = 10
 
-                logger.info(f"收到消息: 主题={msg.topic}, 分区={msg.partition}, 偏移量={msg.offset}")
+        while self.is_running and retry_count < max_retries:
+            try:
+                async for msg in self.consumer:
+                    if not self.is_running:
+                        break
 
-                # 查找对应的处理器
-                handler = self.message_handlers.get(msg.topic)
-                if handler:
+                    # 重置重试计数
+                    retry_count = 0
+
+                    logger.info(f"收到消息: 主题={msg.topic}, 分区={msg.partition}, 偏移量={msg.offset}")
+
+                    # 查找对应的处理器
+                    handler = self.message_handlers.get(msg.topic)
+                    if handler:
+                        try:
+                            # 使用异步执行处理器，避免阻塞消费循环
+                            asyncio.create_task(self.safe_handler_execution(handler, msg.value))
+                        except Exception as e:
+                            logger.error(f"处理消息时出错: {e}")
+                    else:
+                        logger.warning(f"未找到主题 {msg.topic} 的处理器")
+            except asyncio.CancelledError:
+                logger.info("消息消费任务被取消")
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"消费消息时发生错误 (尝试 {retry_count}/{max_retries}): {e}")
+
+                if retry_count < max_retries:
+                    # 等待一段时间后重试
+                    await asyncio.sleep(min(2 ** retry_count, 30))  # 指数退避，最大30秒
+
+                    # 尝试重新连接
                     try:
-                        # 异步执行处理器
-                        asyncio.create_task(handler(msg.value))
-                    except Exception as e:
-                        logger.error(f"处理消息时出错: {e}")
+                        await self.disconnect()
+                        await self.connect()
+                    except Exception as reconnect_error:
+                        logger.error(f"重新连接失败: {reconnect_error}")
                 else:
-                    logger.warning(f"未找到主题 {msg.topic} 的处理器")
-        except asyncio.CancelledError:
-            logger.info("消息消费任务被取消")
+                    logger.error("达到最大重试次数，停止消费")
+                    break
+            finally:
+                self.is_running = False
+
+    async def safe_handler_execution(self, handler, value):
+        """安全执行处理器，带有超时机制"""
+        try:
+            # 设置处理超时（例如30秒）
+            await asyncio.wait_for(handler(value), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.error(f"消息处理超时: {value}")
         except Exception as e:
-            logger.error(f"消费消息时发生错误: {e}")
-        finally:
-            self.is_running = False
+            logger.error(f"处理消息时出错: {e}")
 
     async def start_consuming(self):
         """开始消费消息"""
