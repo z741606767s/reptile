@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import wraps
 import requests
 from googletrans import Translator
 import re
@@ -13,39 +15,78 @@ logging.basicConfig(level=settings.LOG_LEVEL,
 logger = logging.getLogger(__name__)
 
 
+def retry(max_retries=3, delay=1, exceptions=(Exception,)):
+    """
+    重试装饰器
+    :param max_retries: 最大重试次数
+    :param delay: 重试延迟（秒）
+    :param exceptions: 需要重试的异常类型
+    """
+
+    def decorator(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            for attempt in range(max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == max_retries:
+                        logger.error(f"操作失败，已达到最大重试次数 {max_retries}: {e}")
+                        raise
+                    logger.warning(f"操作失败，第 {attempt + 1} 次重试: {e}")
+                    await asyncio.sleep(delay * (attempt + 1))  # 指数退避
+            return None
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == max_retries:
+                        logger.error(f"操作失败，已达到最大重试次数 {max_retries}: {e}")
+                        raise
+                    logger.warning(f"操作失败，第 {attempt + 1} 次重试: {e}")
+                    time.sleep(delay * (attempt + 1))  # 指数退避
+            return None
+
+        # 根据函数类型返回适当的包装器
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+
+    return decorator
+
+
 class Translate:
     def __init__(self):
         self.translator = Translator()
         self.executor = ThreadPoolExecutor(max_workers=5)  # 创建线程池执行同步操作
 
     @staticmethod
-    async def translate_chinese_to_english_with_mymemory(self, text, retries=3, delay=1):
+    async def translate_chinese_to_english_with_mymemory(self, text):
         """
         使用免费翻译API将中文文本翻译成英文
         注意：这个API有使用限制，仅适用于演示目的
         :param self:
         :param text: 中文文本
-        :param retries: 重试次数
-        :param delay: 重试延迟秒数
         :return: 英文文本
         """
-        for attempt in range(retries):
-            try:
-                # 在线程池中执行同步的requests操作
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    self.executor,
-                    self._translate_with_mymemory_sync,
-                    text
-                )
-                return result
-            except Exception as e:
-                logger.error(f"翻译出错 (尝试 {attempt + 1}/{retries}): {e}")
-                if attempt < retries - 1:
-                    await asyncio.sleep(delay)
-                else:
-                    return text
+        try:
+            # 在线程池中执行同步的requests操作
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                self.executor,
+                self._translate_with_mymemory_sync,
+                text
+            )
+            return result
+        except Exception as e:
+            logger.error(f"翻译出错: {e}")
+            return text
 
+    @retry(max_retries=3, delay=1)
     def _translate_with_mymemory_sync(self, text):
         """同步执行的mymemory翻译"""
         url = "https://api.mymemory.translated.net/get"
@@ -64,37 +105,33 @@ class Translate:
             return "Translation failed"
 
     @staticmethod
-    async def translate_chinese_to_english_with_googletrans(self, text, retries=3, delay=1):
+    async def translate_chinese_to_english_with_googletrans(self, text):
         """
         使用googletrans库将中文文本翻译成英文
         :param self:
         :param text: 中文文本
-        :param retries: 重试次数
-        :param delay: 重试延迟秒数
         :return: 英文文本
         """
-        for attempt in range(retries):
-            try:
-                # 在线程池中执行同步的googletrans操作
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    self.executor,
-                    self._translate_with_googletrans_sync,
-                    text
-                )
-                return result
-            except Exception as e:
-                logger.error(f"翻译出错 (尝试 {attempt + 1}/{retries}): {e}")
-                if attempt < retries - 1:
-                    await asyncio.sleep(delay)
-                else:
-                    return text
+        try:
+            # 在线程池中执行同步的googletrans操作
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                self.executor,
+                self._translate_with_googletrans_sync,
+                text
+            )
+            return result
+        except Exception as e:
+            logger.error(f"翻译出错: {e}")
+            return text
 
+    @retry(max_retries=3, delay=1)
     def _translate_with_googletrans_sync(self, text):
         """同步执行的googletrans翻译"""
         translation = self.translator.translate(text, src='zh-cn', dest='en')
         return translation.text
 
+    @retry(max_retries=3, delay=1)
     async def process_text(self, text, translate_type="googletrans"):
         """
         处理文本：翻译中文→英文→小写→用下划线连接单词

@@ -92,12 +92,20 @@ async def translate(txt: str):
     """翻译文本"""
     try:
         translator = Translate()
-        result = await translator.process_text(txt, translate_type="mymemory")
+        result = await translator.process_text(txt, translate_type="googletrans")
         if not result or result == "Translation failed":
             return response_util.error(message="翻译失败")
 
         return response_util.success(data=result, message="翻译成功")
     except Exception as e:
-        return response_util.error(
-            message=f"翻译失败: {str(e)}"
-        )
+        logger.error(f"翻译失败: {str(e)}")
+        try:
+            translator = Translate()
+            result = await translator.process_text(txt, translate_type="mymemory")
+            if not result or result == "Translation failed":
+                return response_util.error(message="翻译失败")
+            return response_util.success(data=result, message="翻译成功")
+        except Exception as e:
+            return response_util.error(
+                message=f"翻译失败: {str(e)}"
+            )
