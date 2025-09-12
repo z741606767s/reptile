@@ -14,9 +14,10 @@ bcrypt==4.0.1
 python-dotenv==1.0.0
 email-validator==2.3.0
 pydantic~=2.11.7
-starlette~=0.27.0
+starlette~=0.47.2
 pydantic-settings~=2.10.1
 aiohttp~=3.12.15
 beautifulsoup4~=4.13.5
 requests~=2.32.5
 googletrans~=4.0.0rc1
+aiofiles==22.1.0

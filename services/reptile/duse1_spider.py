@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import os
+import aiofiles
 import aiohttp
 import logging
 from typing import Dict, List, Optional, Any, Set
@@ -12,6 +15,7 @@ from config import settings
 from database.mysql import mysql_db
 from database.kafka_producer import kafka_producer
 from database.kafka_topics import KafkaTopic
+from services.translate import Translate
 
 # 配置日志
 logging.basicConfig(level=settings.LOG_LEVEL,
@@ -30,7 +34,9 @@ class Duse1Spider:
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15"
         ]
         self.base_url = "https://www.duse1.com"
+        self.base_img_url = "https://vres.cfaqcgj.com/"
         self.categories = []  # 存储分类信息
+        self.banners = []  # 存储banner信息
         self.visited_urls = set()  # 已访问的URL集合
         self.task_timeout = 300  # 5分钟超时
 
@@ -91,7 +97,7 @@ class Duse1Spider:
             logger.error(f"请求异常: {url}, 错误: {str(e)}")
             return None
 
-    async def get_categories(self) -> List[Dict[str, str]]:
+    async def get_home_html(self) -> List[Dict[str, str]]:
         """
         获取网站分类信息
 
@@ -105,15 +111,41 @@ class Duse1Spider:
             return []
 
         soup = BeautifulSoup(html_content, 'html.parser')
+
+        try:
+            # 处理分类信息
+            categories = await self.get_categories(soup)
+
+            # 处理banner信息
+            await self.get_banners(soup)
+            return categories
+        except Exception as e:
+            logger.error(f"完整首页内容处理失败: {str(e)}")
+            return []
+
+    async def get_categories(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
         categories = []
 
         # 根据网站实际结构查找分类链接
         # 这里需要根据实际网站结构调整选择器
         nav_elements = soup.select('.main .menu-item a')
 
+        # 初始化翻译
+        translator = Translate()
+
         for element in nav_elements:
             href = element.get('href', '')
             text = element.get_text().strip()
+
+            # 获取类名
+            name_element = element.select_one('.menu-item-label')
+            name = name_element.get_text().strip() if name_element else ''
+
+            # 类名翻译转换slug
+            slug = await translator.process_text(name, translate_type="googletrans")
+            if not slug or slug == "Translation failed":
+                logger.error("googletrans 翻译失败")
+                return []
 
             # 过滤无效链接和非分类链接
             if (href and href != '#' and href != '/' and
@@ -128,7 +160,11 @@ class Duse1Spider:
                 # 检查是否是本站链接
                 if self._is_same_domain(self.base_url, full_url):
                     category = {
-                        'name': text,
+                        'name': name,
+                        'slug': slug,
+                        'parent_id': 0,  # 顶级
+                        'level': 1,
+                        'site': self.base_url,
                         'url': full_url,
                         'href': href
                     }
@@ -146,14 +182,232 @@ class Duse1Spider:
 
         return categories
 
+    async def get_banners(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
+        banners = []
+
+        # 查找轮播图元素
+        carousel_items = soup.select('.swiper-slide .carousel-item')
+
+        # 收集所有需要下载的图片URL
+        download_tasks = []
+
+        for item in carousel_items:
+            text = item.get_text().strip()
+
+            # 获取图片URL
+            img_element = item.select_one('.carousel-item-cover img')
+            img_url = img_element.get('data-original', '') if img_element else ''
+            if not img_url:
+                img_url = img_element.get('src', '') if img_element else ''
+
+            # 转换为绝对URL
+            full_img_url = urljoin(self.base_img_url, img_url) if img_url else ''
+
+            # 获取标题
+            title_element = item.select_one('.carousel-item-title')
+            title = title_element.get_text().strip() if title_element else ''
+
+            # 获取标签
+            tags = []
+            tag_elements = item.select('.carousel-item-tags .tag')
+            for tag in tag_elements:
+                tag_text = tag.get_text().strip()
+                if tag_text:
+                    tags.append(tag_text)
+
+            # 获取描述
+            desc_element = item.select_one('.carousel-item-desc')
+            desc = desc_element.get_text().strip() if desc_element else ''
+
+            # 生成本地路径（即使图片尚未下载）
+            # local_img_path = ""
+            # if full_img_url:
+            #     try:
+            #         # 生成唯一的本地文件名
+            #         local_img_path = await self.generate_local_path(full_img_url, 'banners')
+            #     except Exception as e:
+            #         logger.error(f"生成本地路径失败: {full_img_url}, 错误: {str(e)}")
+            #         local_img_path = full_img_url  # 如果生成失败，使用原始URL
+
+            banner = {
+                'banner_url': full_img_url,  # 直接使用本地路径
+                'original_url': full_img_url,  # 保留原始URL用于下载
+                'title': title,
+                'tag_names': "/ ".join(tags),
+                'desc': desc,
+                'jump_url': "",
+                'jump_method': "",
+                'download_status': 'pending' if full_img_url else 'skipped',  # 下载状态
+            }
+
+            # 避免重复添加
+            if not any(c['banner_url'] == full_img_url for c in banners):
+                banners.append(banner)
+                logger.info(f"发现banner: {text} -> {full_img_url}")
+
+                # 如果有图片URL，添加到下载任务
+                # if full_img_url:
+                #     download_tasks.append((full_img_url, len(banners) - 1))  # 使用当前索引
+
+        # 异步并发下载所有图片
+        # if download_tasks:
+        #     await self.download_images_async(download_tasks, banners)
+
+        self.banners = banners
+        logger.info(f"共找到 {len(banners)} 个banner")
+
+        # 保存分类信息到数据库
+        await self.save_banners(banners)
+
+        return banners
+
+    async def generate_local_path(self, image_url: str, path_name: str) -> str:
+        """
+        生成本地存储路径
+        Args:
+            image_url: 图片URL
+            path_name: 路径
+        Returns:
+            本地图片路径
+        """
+        # 创建public目录（如果不存在）
+        public_dir = os.path.join(os.getcwd(), 'public')
+        images_dir = os.path.join(public_dir, 'images', path_name)
+
+        if not os.path.exists(images_dir):
+            os.makedirs(images_dir, exist_ok=True)
+
+        # 从URL中提取文件名
+        parsed_url = urlparse(image_url)
+        filename = os.path.basename(parsed_url.path)
+
+        # 如果没有文件名或文件名无效，使用URL的MD5哈希
+        if not filename or '.' not in filename:
+            url_hash = hashlib.md5(image_url.encode()).hexdigest()
+            filename = f"{url_hash}.jpg"
+        else:
+            # 确保文件名安全
+            filename = re.sub(r'[^\w\-_.]', '_', filename)
+
+        return f"/images/{path_name}/{filename}"
+
+    async def download_images_async(self, download_tasks: List[tuple], banners: List[Dict[str, Any]]):
+        """
+        异步并发下载所有图片
+
+        Args:
+            download_tasks: 包含(图片URL, banner索引)的元组列表
+            banners: banner列表，用于更新下载状态
+        """
+        # 创建所有下载任务的协程
+        tasks = []
+        for img_url, banner_idx in download_tasks:
+            # 检查索引是否有效
+            if banner_idx < 0 or banner_idx >= len(banners):
+                logger.error(f"无效的banner索引: {banner_idx}, 列表长度: {len(banners)}")
+                continue
+
+            task = self.download_single_image(img_url, banner_idx, banners)
+            tasks.append(task)
+
+        # 并发执行所有下载任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理下载结果
+        for i, result in enumerate(results):
+            if i < len(download_tasks):  # 确保索引有效
+                img_url, banner_idx = download_tasks[i]
+                if isinstance(result, Exception):
+                    logger.error(f"图片下载失败: {img_url}, 错误: {str(result)}")
+                    if banner_idx < len(banners):  # 再次检查索引有效性
+                        banners[banner_idx]['download_status'] = 'failed'
+                else:
+                    if banner_idx < len(banners):  # 再次检查索引有效性
+                        banners[banner_idx]['download_status'] = 'success'
+
+    async def download_single_image(self, image_url: str, banner_idx: int, banners: List[Dict[str, Any]]):
+        """
+        下载单个图片到预先生成的本地路径
+
+        Args:
+            image_url: 图片URL
+            banner_idx: banner在列表中的索引
+            banners: banner列表
+        """
+        # 检查索引是否有效
+        if banner_idx < 0 or banner_idx >= len(banners):
+            logger.error(f"无效的banner索引: {banner_idx}, 列表长度: {len(banners)}")
+            return
+
+        try:
+            # 获取banner对象
+            banner = banners[banner_idx]
+            local_path = banner['banner_url']
+
+            # 如果本地路径不是以/images/开头，说明不是本地路径，跳过下载
+            if not local_path.startswith('/images/'):
+                logger.debug(f"跳过下载，使用原始URL: {image_url}")
+                return
+
+            # 生成完整本地路径
+            full_local_path = os.path.join(os.getcwd(), 'public', local_path.lstrip('/'))
+
+            # 如果文件已存在，直接返回
+            if os.path.exists(full_local_path):
+                logger.debug(f"图片已存在: {full_local_path}")
+                return
+
+            # 确保目录存在
+            os.makedirs(os.path.dirname(full_local_path), exist_ok=True)
+
+            # 异步下载图片
+            session = await self.init_session()
+
+            # 设置更长的超时时间
+            timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=10)
+
+            # 添加Referer头，模拟从原始网站发起的请求
+            headers = {
+                'Referer': self.base_img_url,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            }
+
+            async with session.get(image_url, headers=headers, timeout=timeout) as response:
+                if response.status == 200:
+                    # 异步写入文件
+                    async with aiofiles.open(full_local_path, 'wb') as f:
+                        await f.write(await response.read())
+
+                    logger.info(f"图片下载成功: {image_url} -> {full_local_path}")
+                else:
+                    logger.error(f"下载图片失败: {image_url}, 状态码: {response.status}")
+                    # 如果下载失败，将banner_url恢复为原始URL
+                    banners[banner_idx]['banner_url'] = image_url
+                    raise Exception(f"HTTP状态码: {response.status}")
+        except asyncio.TimeoutError:
+            logger.error(f"下载图片超时: {image_url}")
+            # 如果下载超时，将banner_url恢复为原始URL
+            banners[banner_idx]['banner_url'] = image_url
+            raise Exception(f"下载超时")
+        except aiohttp.ClientError as e:
+            logger.error(f"下载图片网络错误: {image_url}, 错误: {str(e)}")
+            # 如果网络错误，将banner_url恢复为原始URL
+            banners[banner_idx]['banner_url'] = image_url
+            raise
+        except Exception as e:
+            logger.error(f"下载图片异常: {image_url}, 错误: {str(e)}")
+            # 如果下载失败，将banner_url恢复为原始URL
+            banners[banner_idx]['banner_url'] = image_url
+            raise
+
     async def crawl_category_list(self, category: Dict[str, str], max_pages: int = 10) -> List[Dict[str, Any]]:
         """
         爬取分类下的列表页
-
         Args:
             category: 分类信息
             max_pages: 最大爬取页数
-
         Returns:
             列表页内容
         """
@@ -225,10 +479,8 @@ class Duse1Spider:
     async def crawl_detail_page(self, url: str) -> Optional[Dict[str, Any]]:
         """
         爬取详情页内容
-
         Args:
             url: 详情页URL
-
         Returns:
             详情页数据
         """
@@ -338,31 +590,97 @@ class Duse1Spider:
 
     async def save_categories(self, categories: List[Dict[str, str]]) -> bool:
         """
-        保存分类信息到数据库
-
+        保存分类信息到数据库（支持已存在则更新）
         Args:
             categories: 分类列表
-
         Returns:
             是否成功保存
         """
+        sql = """
+            INSERT INTO r_category
+                (name, slug, parent_id, level, sort, site, url, href, created_at, updated_at)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                name       = VALUES(name),
+                parent_id  = VALUES(parent_id),
+                level      = VALUES(level),
+                sort       = VALUEs(sort),
+                url        = VALUES(url),
+                href       = VALUES(href),
+                updated_at = NOW();
+            """
+        success_count = 0
         try:
-            async with mysql_db.get_cursor() as cursor:
-                # 清空现有分类（根据需求决定是否保留历史分类）
-                await cursor.execute("DELETE FROM website_categories WHERE site = %s", (self.base_url,))
+            async with mysql_db.get_connection() as conn:
+                async with conn.cursor() as cursor:
+                    for index, category in enumerate(categories):
+                        try:
+                            await cursor.execute(sql, (
+                                category['name'],
+                                category.get('slug', ''),
+                                category.get('parent_id', 0),
+                                category.get('level', 1),
+                                index + 1,
+                                category.get('site', self.base_url),
+                                category['url'],
+                                category.get('href', '')
+                            ))
+                            success_count += 1
+                            logger.debug(f"成功插入/更新分类: {category['name']}")
+                        except Exception as e:
+                            logger.error(f"插入分类失败: {category['name']}, 错误: {str(e)}")
 
-                # 插入新分类
-                for category in categories:
-                    await cursor.execute(
-                        """INSERT INTO website_categories 
-                           (site, name, url, href, created_at) 
-                           VALUES (%s, %s, %s, %s, NOW())""",
-                        (self.base_url, category['name'], category['url'], category['href'])
-                    )
+                    # 显式提交事务
+                    await conn.commit()
 
-                return True
+            logger.info(f"分类保存完成，成功处理 {success_count}/{len(categories)} 条记录")
+            return success_count > 0
         except Exception as e:
             logger.error(f"保存分类信息失败: {str(e)}")
+            return False
+
+    async def save_banners(self, banners: List[Dict[str, str]]) -> bool:
+        """
+        保存分类信息到数据库（支持已存在则更新）
+        Args:
+            banners: banner列表
+        Returns:
+            是否成功保存
+        """
+        sql = """
+            INSERT INTO r_drama_banner
+                (banner_url, title, tag_names, `desc`, jump_url, jump_method, sort, created_at, updated_at)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW());
+            """
+        success_count = 0
+        try:
+            async with mysql_db.get_connection() as conn:
+                async with conn.cursor() as cursor:
+                    for index, banner in enumerate(banners):
+                        try:
+                            await cursor.execute(sql, (
+                                banner['banner_url'],
+                                banner['title'],
+                                banner.get('tag_names', ''),
+                                banner.get('desc', ''),
+                                banner.get('jump_url', ''),
+                                banner.get('jump_method', ''),
+                                index + 1
+                            ))
+                            success_count += 1
+                            logger.debug(f"成功插入banner: {banner['title']}")
+                        except Exception as e:
+                            logger.error(f"插入banner失败: {banner['title']}, 错误: {str(e)}")
+
+                    # 显式提交事务
+                    await conn.commit()
+
+            logger.info(f"Banner保存完成，成功处理 {success_count}/{len(banners)} 条记录")
+            return success_count > 0
+        except Exception as e:
+            logger.error(f"保存banner信息失败: {str(e)}")
             return False
 
     async def save_detail_data(self, detail_data: Dict[str, Any]) -> bool:
@@ -433,22 +751,22 @@ class Duse1Spider:
 
         try:
             # 获取分类
-            categories = await self.get_categories()
+            categories = await self.get_home_html()
 
             if not categories:
                 logger.error("未找到任何分类，爬虫停止")
                 return
 
             # 爬取每个分类
-            all_details = []
-            for category in categories:
-                details = await self.crawl_category_list(category)
-                all_details.extend(details)
-
-                # 分类间延迟
-                await asyncio.sleep(random.uniform(2, 5))
-
-            logger.info(f"爬虫完成，共爬取 {len(all_details)} 个详情页")
+            # all_details = []
+            # for category in categories:
+            #     details = await self.crawl_category_list(category)
+            #     all_details.extend(details)
+            #
+            #     # 分类间延迟
+            #     await asyncio.sleep(random.uniform(2, 5))
+            #
+            # logger.info(f"爬虫完成，共爬取 {len(all_details)} 个详情页")
 
         except Exception as e:
             logger.error(f"爬虫运行异常: {str(e)}")
