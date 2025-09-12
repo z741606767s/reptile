@@ -34,7 +34,7 @@ CREATE TABLE `r_category` (
 
 
 -- 剧表
-CREATE TABLE `r_darma` (
+CREATE TABLE `r_drama` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '剧ID',
   `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '剧名称',
   `desc` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '简介',
