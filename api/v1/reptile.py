@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from config import settings
 from services.reptile import ReptileService, reptile_service
+from services.translate import Translate
 from utils.response import response_util
 import logging
 
@@ -14,10 +15,12 @@ router = APIRouter()
 
 
 @router.post("/crawl")
-async def start_crawl(url: str = Query(...), depth: int = 1, max_pages: int = 10):
+async def start_crawl(url: str = Query(...), depth: int = 1, max_pages: int = 10000000):
     """启动爬虫任务"""
     try:
         result = await reptile_service.crawl_url(url, depth, max_pages)
+        logger.info(f"爬虫任务已启动，任务ID: {result['task_id']}，URL: {url}，深度: {depth}，最大页面数: {max_pages}")
+
         return response_util.success(
             data=result,
             message="爬虫任务已启动"
@@ -82,4 +85,19 @@ async def stop_crawl_task(task_id: str):
     except Exception as e:
         return response_util.error(
             message=f"停止任务失败: {str(e)}"
+        )
+
+@router.post("/crawl/translate")
+async def translate(txt: str):
+    """翻译文本"""
+    try:
+        translator = Translate()
+        result  = await translator.process_text(txt, translate_type="googletrans")
+        if not result or result == "Translation failed":
+            return response_util.error(message="翻译失败")
+
+        return response_util.success(data=result, message="翻译成功")
+    except Exception as e:
+        return response_util.error(
+            message=f"翻译失败: {str(e)}"
         )

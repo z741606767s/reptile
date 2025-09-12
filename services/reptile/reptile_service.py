@@ -149,7 +149,7 @@ class ReptileService:
 
         return metadata
 
-    async def crawl_url(self, url: str, depth: int = 1, max_pages: int = 10) -> Dict[str, Any]:
+    async def crawl_url(self, url: str, depth: int = 1, max_pages: int = 10000000) -> Dict[str, Any]:
         """
         爬取URL及其链接
 
