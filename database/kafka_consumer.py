@@ -15,7 +15,6 @@ logging.basicConfig(level=settings.LOG_LEVEL,
 logger = logging.getLogger(__name__)
 
 
-
 class KafkaConsumer:
     def __init__(self):
         self.consumer: Optional[AIOKafkaConsumer] = None
@@ -39,7 +38,7 @@ class KafkaConsumer:
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
             enable_auto_commit=False,  # 禁用自动提交，手动控制
             auto_offset_reset='earliest',
-            metadata_max_age_ms=30000, # 允许自动创建主题
+            metadata_max_age_ms=30000,  # 允许自动创建主题
             session_timeout_ms=30000,  # 增加会话超时时间（默认10秒）
             heartbeat_interval_ms=3000,  # 设置心跳间隔（默认3秒）
             max_poll_interval_ms=300000,  # 增加最大轮询间隔（默认5分钟）

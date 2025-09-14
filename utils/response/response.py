@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Optional, Dict, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 from fastapi.responses import JSONResponse
 from fastapi import status
@@ -15,8 +15,41 @@ logger = logging.getLogger(__name__)
 
 
 class ResponseStatus(str, Enum):
+    """响应状态枚举"""
     SUCCESS = "success"
     ERROR = "error"
+
+
+class BaseResponse(BaseModel):
+    """基础响应模型"""
+    status: ResponseStatus = Field(..., description="响应状态: success/error")
+    message: Optional[str] = Field(None, description="响应消息")
+    data: Optional[Any] = Field(None, description="响应数据")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="时间戳")
+    code: int = Field(200, description="HTTP状态码")
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class PaginatedData(BaseModel):
+    """分页数据模型"""
+    items: List[Any] = Field(..., description="数据列表")
+    total: int = Field(..., description="总记录数")
+    page: int = Field(..., description="当前页码")
+    limit: int = Field(..., description="每页数量")
+
+
+class SuccessResponse(BaseResponse):
+    """成功响应模型"""
+    status: ResponseStatus = ResponseStatus.SUCCESS
+
+
+class ErrorResponse(BaseResponse):
+    """错误响应模型"""
+    status: ResponseStatus = ResponseStatus.ERROR
 
 
 class BaseResponse(BaseModel):
@@ -33,14 +66,6 @@ class BaseResponse(BaseModel):
         if isinstance(result.get('timestamp'), datetime):
             result['timestamp'] = result['timestamp'].isoformat()
         return result
-
-
-class SuccessResponse(BaseResponse):
-    status: ResponseStatus = ResponseStatus.SUCCESS
-
-
-class ErrorResponse(BaseResponse):
-    status: ResponseStatus = ResponseStatus.ERROR
 
 
 class PaginatedResponse(SuccessResponse):

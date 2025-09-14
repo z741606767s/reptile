@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from config import settings
-from services.reptile import ReptileService, reptile_service, duse1_spider
+from services.reptile import reptile_service, duse1_spider
 from services.translate import Translate
 from utils.response import response_util
 import logging
@@ -46,8 +46,6 @@ async def get_crawl_result(url: str = Query(...)):
         )
 
 
-
-
 @router.get("/crawl/tasks")
 async def get_all_tasks():
     """获取所有任务"""
@@ -58,9 +56,6 @@ async def get_all_tasks():
         return response_util.error(
             message=f"获取任务列表失败: {str(e)}"
         )
-
-
-
 
 
 @router.post("/crawl/translate")
@@ -87,20 +82,35 @@ async def translate(txt: str):
             )
 
 
-@router.post("/crawl/dushe1")
+@router.post("/crawl/dushe1/run")
 async def start_crawl_dushe1():
-    """启动爬虫任务"""
+    """启动爬虫获取首页分类与banned"""
     try:
         result = await duse1_spider.run()
-        logger.info(f"爬虫任务已启动")
+        logger.info(f"爬虫获取首页分类与banned")
 
         return response_util.success(
             data=result,
-            message="爬虫任务已启动"
+            message="爬虫任务成功"
         )
     except Exception as e:
         return response_util.error(
-            message=f"启动爬虫任务失败: {str(e)}"
+            message=f"爬虫任务失败: {str(e)}"
+        )
+
+
+@router.post("/crawl/dushe1/type")
+async def start_crawl_dushe1_type():
+    """启动爬虫抓取分类下的类型"""
+    try:
+        result = await duse1_spider.details_type()
+        return response_util.success(
+            data=result,
+            message="爬虫任务成功"
+        )
+    except Exception as e:
+        return response_util.error(
+            message=f"爬虫任务失败: {str(e)}"
         )
 
 

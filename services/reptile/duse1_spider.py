@@ -4,7 +4,7 @@ import os
 import aiofiles
 import aiohttp
 import logging
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -15,6 +15,7 @@ from config import settings
 from database.mysql import mysql_db
 from database.kafka_producer import kafka_producer
 from database.kafka_topics import KafkaTopic
+from services.category import category_service
 from services.translate import Translate
 
 # 配置日志
@@ -121,6 +122,75 @@ class Duse1Spider:
             return categories
         except Exception as e:
             logger.error(f"完整首页内容处理失败: {str(e)}")
+            return []
+
+    async def get_category_html(self, category_url: str) -> List[Dict[str, str]]:
+        """爬取分类页信息"""
+        logger.info("开始获取网站分类信息")
+        html_content = await self.fetch_url(category_url)
+        if not html_content:
+            logger.error("获取分类内容失败")
+            return []
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+        categories = []
+
+        try:
+            # 获取所有filter-row元素
+            filter_rows = soup.select('.filter-box .filter-row')
+
+            for row in filter_rows:
+                # 获取filter-row-side中的strong标签
+                side_div = row.select_one('.filter-row-side')
+                if not side_div:
+                    continue
+
+                strong_tag = side_div.find('strong')
+                if not strong_tag:
+                    continue
+
+                # 排除包含"排序"的filter-row
+                # if '排序' in strong_tag.get_text():
+                #     continue
+
+                # 获取level2分类名称
+                level2_name = strong_tag.get_text().strip().replace(':', '').replace('：', '')
+                category = {
+                    'name': level2_name,
+                    'url': '',
+                    'level': []
+                }
+
+                # 获取对应的filter-row-main(level2)中的level3分类
+                main_div = row.select_one('.filter-row-main')
+                if not main_div:
+                    categories.append(category)
+                    continue
+
+                # 获取所有filter-item链接
+                filter_items = main_div.select('.filter-item')
+                for item in filter_items:
+                    name = item.get_text().strip()
+                    url = item.get('href', '')
+
+                    if name in ['全部', '类型', '综合']:
+                        category['url'] = url
+                    else:
+                        # 确保level3字段是列表类型
+                        if not isinstance(category['level'], list):
+                            category['level'] = []
+
+                        # 添加到结果列表
+                        category['level'].append({
+                            'name': name,
+                            'url': url
+                        })
+                # 添加到结果列表
+                categories.append(category)
+
+            return categories
+        except Exception as e:
+            logger.error(f"爬取类型失败: {str(e)}")
             return []
 
     async def get_categories(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
@@ -770,6 +840,53 @@ class Duse1Spider:
 
         except Exception as e:
             logger.error(f"爬虫运行异常: {str(e)}")
+        finally:
+            await self.close_session()
+
+    async def details_type(self):
+        """抓取子分类"""
+        try:
+            # 数据库获取顶级分类列表
+            top_level_categories = await category_service.get_multi()
+            if not top_level_categories:
+                logger.error("未找到任何分类，爬虫停止")
+                return []
+
+            all_subcategories = []
+            for category in top_level_categories:
+                # 过滤无效url
+                categorie_url = category.url
+                if not categorie_url:
+                    continue
+
+                logger.info(f"开始爬取: {category.name}")
+                subcategories = await self.get_category_html(categorie_url)
+                if not subcategories:
+                    continue
+
+                category_data = {
+                    'name': category.name,
+                    'level': subcategories,
+                }
+                all_subcategories.append(category_data)
+
+                # 发送到Kafka
+                await kafka_producer.send_message(
+                    KafkaTopic.CRAWL_LEVEL_RESULTS,
+                    {
+                        'type': 'detail_page',
+                        'url': self.base_url,
+                        'data': category_data,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                )
+
+                logger.info(f"爬取: {category.name} 结束")
+
+            return all_subcategories
+        except Exception as e:
+            logger.error(f"爬虫运行异常: {str(e)}")
+            return []
         finally:
             await self.close_session()
 

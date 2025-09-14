@@ -134,7 +134,7 @@ class Translate:
     @retry(max_retries=3, delay=1)
     async def process_text(self, text, translate_type="googletrans"):
         """
-        处理文本：翻译中文→英文→小写→用下划线连接单词
+        处理文本：翻译中文→英文→小写→用连字符连接单词→将连字符替换为下划线
         :param text: 中文文本
         :param translate_type: 翻译类型，可选"googletrans"或"mymemory"
         :return: 处理后的文本
@@ -146,15 +146,28 @@ class Translate:
             english_text = await self.translate_chinese_to_english_with_mymemory(self, text)
         else:
             english_text = text
-        logger.info(f"翻译结果: {english_text}")
 
         # 转换为小写
         lower_text = english_text.lower()
 
-        # 移除非字母数字字符，用下划线替换空格
+        # 移除非字母数字字符，用连字符替换空格
         processed_text = re.sub(r'[^a-zA-Z0-9\s]', '', lower_text)  # 移除非字母数字字符
-        processed_text = re.sub(r'\s+', '_', processed_text.strip())  # 用下划线替换空格
+        processed_text = re.sub(r'\s+', '-', processed_text.strip())  # 用连字符替换空格
+
+        # 将连字符替换为下划线
+        processed_text = processed_text.replace('-', '_')
+
+        # 确保不以下划线开头或结尾
+        processed_text = processed_text.strip('_')
+
+        # 移除连续的下划线
+        processed_text = re.sub(r'_+', '_', processed_text)
+
+        # 再次确保不以下划线开头或结尾
+        processed_text = processed_text.strip('_')
 
         return processed_text
 
 
+# 全局
+translate_service = Translate()
