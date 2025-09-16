@@ -249,7 +249,7 @@ class KafkaConsumer:
         """安全执行处理器，带有超时机制"""
         try:
             # 设置处理超时（例如30秒）
-            await asyncio.wait_for(handler(value), timeout=30.0)
+            await asyncio.wait_for(handler(value), timeout=600.0)
         except asyncio.TimeoutError:
             logger.error(f"消息处理超时: {value}")
         except Exception as e:

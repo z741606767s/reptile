@@ -29,11 +29,11 @@ class CategoryService(object):
             return None
 
     @staticmethod
-    async def get_category_by_name(name: str) -> Optional[CategoryModel]:
+    async def get_category_by_name(name: str, parent_id: int = 0) -> Optional[CategoryModel]:
         """根据ID获取分类"""
         try:
-            query = "SELECT * FROM r_category WHERE name = %s limit 1"
-            result = await mysql_db.fetch_one(query, (name,))
+            query = "SELECT * FROM r_category WHERE name = %s and parent_id = %s limit 1"
+            result = await mysql_db.fetch_one(query, (name, parent_id))
             return CategoryModel(**result) if result else None
         except Exception as e:
             logger.error(f"获取分类失败: {e}")
@@ -252,102 +252,133 @@ class CategoryService(object):
     async def save_category_level(self, data):
         """顶级分类子类落库"""
         logger.info(f"{data['name']} save_category_level开始消费")
-        if not data or len(data['level']) <= 0:
-            logger.error("data 数据不存在")
+
+        # 验证数据
+        if not data or not data.get('level'):
+            logger.error("data 数据不存在或缺少level字段")
             return None
-        logger.info(f"====data: {str(data)}")
+
+        logger.debug(f"处理数据: {data['name']}")
+
         try:
-            category = await self.get_category_by_name(data['name'])
+            # 获取顶级分类
+            category = await self.get_category_by_name(data['name'], parent_id=0)
             if not category:
-                logger.error(f"{data['name']} 数据不存在")
+                logger.error(f"{data['name']} 顶级分类不存在")
                 return None
 
-            # 初始化翻译
+            # 初始化翻译器
             translator = Translate()
 
-            # 遍历所有二级分类（类型、地区、语言、年份、排序）
+            # 处理二级分类
             for index, level2 in enumerate(data['level']):
-                try:
-                    # 类名翻译转换slug
-                    slug = await translator.process_text(level2['name'], translate_type="googletrans")
-                    if not slug or slug == "Translation failed":
-                        logger.error(f"googletrans 翻译失败: {level2['name']}")
-                        continue  # 跳过此项而不是返回空
+                await self._process_level2_category(
+                    level2, category, index, translator
+                )
 
-                    # 处理URL为空的情况
-                    url = level2['url']
-                    if url and url.startswith('/'):
-                        url = f"{category.site}{level2['url']}"
-                    elif not url:
-                        url = f"{category.site}/show/2-----1-1.html"  # 默认URL
-                        logger.warning(f"{level2['name']} URL为空，使用默认URL: {url}")
+            return True
 
-                    category_level2 = await self.create(CategoryCreate(
-                        name=level2['name'],
-                        slug=slug,
-                        parent_id=category.id,
-                        level=2,
-                        sort=index + 1,
-                        is_enabled=1,
-                        site=category.site,
-                        url=url,
-                        href=level2['url'],
-                    ))
-                    if not category_level2:
-                        logger.error(f"{level2['name']} 新增失败")
-                        continue  # 跳过此项而不是返回
-
-                    logger.info(f"{level2['name']} 新增成功")
-
-                    # 检查是否有三级分类
-                    if not level2.get('level'):
-                        logger.info(f"{level2['name']} 无子分类")
-                        continue
-
-                    # 遍历三级分类
-                    for index2, level3 in enumerate(level2['level']):
-                        try:
-                            # 类名翻译转换slug
-                            slug3 = await translator.process_text(level3['name'], translate_type="googletrans")
-                            if not slug3 or slug3 == "Translation failed":
-                                logger.error(f"googletrans 翻译失败: {level3['name']}")
-                                continue  # 跳过此项
-
-                            # 处理URL
-                            url3 = level3['url']
-                            if url3 and url3.startswith('/'):
-                                url3 = f"{category.site}{level3['url']}"
-                            elif not url3:
-                                url3 = f"{category.site}/show/2-----1-1.html"  # 默认URL
-                                logger.warning(f"{level3['name']} URL为空，使用默认URL: {url3}")
-
-                            category_level3 = await self.create(CategoryCreate(
-                                name=level3['name'],
-                                slug=slug3,
-                                parent_id=category_level2.id,
-                                level=3,
-                                sort=index2 + 1,
-                                is_enabled=1,
-                                site=category.site,
-                                url=url3,
-                                href=level3['url'],
-                            ))
-                            if not category_level3:
-                                logger.error(f"{level3['name']} 新增失败")
-                                continue  # 跳过此项
-                            logger.info(f"{level2['name']}-{level3['name']} 新增成功")
-                        except Exception as e:
-                            logger.error(f"处理三级分类 {level3['name']} 时出错: {e}")
-                            continue  # 继续处理下一个三级分类
-                except Exception as e:
-                    logger.error(f"处理二级分类 {level2['name']} 时出错: {e}")
-                    continue  # 继续处理下一个二级分类
-
-            return True  # 所有处理完成
         except Exception as e:
             logger.error(f"顶级分类子类落库失败: {e}")
             return None
 
+    async def _process_level2_category(self, level2_data, parent_category, index, translator):
+        """处理二级分类"""
+        try:
+            # 翻译名称获取slug
+            slug = await translator.process_text(level2_data['name'], translate_type="googletrans")
+            if not slug or slug == "Translation failed":
+                logger.error(f"googletrans 翻译失败: {level2_data['name']}")
+                return
+
+            # 构建完整URL
+            url = self._build_full_url(level2_data.get('url'), parent_category.site)
+
+            # 创建二级分类
+            category_level2 = await self.create(CategoryCreate(
+                name=level2_data['name'],
+                slug=slug,
+                parent_id=parent_category.id,
+                level=2,
+                sort=index + 1,
+                is_enabled=1,
+                site=parent_category.site,
+                url=url,
+                href=level2_data.get('url', ''),
+            ))
+
+            if not category_level2:
+                logger.error(f"{level2_data['name']} 新增失败")
+                return
+
+            logger.info(f"{level2_data['name']} 新增成功")
+
+            # 处理三级分类（如果有）
+            if not level2_data.get('level'):
+                logger.info(f"{level2_data['name']} 无子分类")
+                return
+
+            await self._process_level3_categories(
+                level2_data['level'], category_level2, parent_category.site, translator
+            )
+
+        except Exception as e:
+            logger.error(f"处理二级分类 {level2_data.get('name', '未知')} 时出错: {e}")
+
+    async def _process_level3_categories(self, level3_list, parent_category, site, translator):
+        """处理三级分类列表"""
+        for index, level3 in enumerate(level3_list):
+            try:
+                # 翻译名称获取slug
+                slug = await translator.process_text(level3['name'], translate_type="googletrans")
+                if not slug or slug == "Translation failed":
+                    logger.error(f"googletrans 翻译失败: {level3['name']}")
+                    continue
+
+                # 构建完整URL
+                url = self._build_full_url(level3.get('url'), site)
+
+                # 创建三级分类
+                category_level3 = await self.create(CategoryCreate(
+                    name=level3['name'],
+                    slug=slug,
+                    parent_id=parent_category.id,
+                    level=3,
+                    sort=index + 1,
+                    is_enabled=1,
+                    site=site,
+                    url=url,
+                    href=level3.get('url', ''),
+                ))
+
+                if not category_level3:
+                    logger.error(f"{level3['name']} 新增失败")
+                    continue
+
+                logger.info(f"{parent_category.name}-{level3['name']} 新增成功")
+
+            except Exception as e:
+                logger.error(f"处理三级分类 {level3.get('name', '未知')} 时出错: {e}")
+
+    def _build_full_url(self, url, site):
+        """构建完整URL"""
+        if not url:
+            return ""
+
+        if url.startswith('/'):
+            return f"{site}{url}"
+
+        return url
+
+    async def traverse_tree(self, node, depth=0):
+        # 打印当前节点的信息，使用缩进表示层级
+        indent = "  " * depth
+        print(f"{indent}层级 {depth}: {node['name']} - URL: {node.get('url', 'N/A')}")
+
+        # 如果当前节点有子层级，递归遍历每个子节点
+        if 'level' in node:
+            for child in node['level']:
+                await self.traverse_tree(child, depth + 1)
 
 # 创建service实例
 category_service = CategoryService()

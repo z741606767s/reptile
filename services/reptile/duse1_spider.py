@@ -881,6 +881,9 @@ class Duse1Spider:
                     }
                 )
 
+                # 直接入库
+                # await category_service.save_category_level(category_data)
+
                 logger.info(f"爬取: {category.name} 结束")
 
             return all_subcategories
