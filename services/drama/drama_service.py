@@ -13,6 +13,7 @@ from schemas.drama_schemas import (  # API层数据验证与响应模型
     DramaBrief,
     Drama
 )
+from utils.tool.tools import is_valid_url
 
 # 配置日志
 logging.basicConfig(level=settings.LOG_LEVEL,
@@ -28,44 +29,6 @@ class DramaService:
     """
 
     # ------------------------------ 基础CRUD操作 ------------------------------
-    # @staticmethod
-    # async def create_drama(drama_in: DramaCreate) -> Optional[DramaModel]:
-    #     """
-    #     创建新剧集
-    #     :param drama_in: 剧集创建请求数据（Pydantic模型）
-    #     :return: 创建成功返回完整DramaModel，失败返回None
-    #     """
-    #     try:
-    #         # 1. 处理特殊类型转换（Pydantic -> 数据库兼容格式）
-    #         drama_data = drama_in.dict()
-    #
-    #         # HttpUrl类型转为字符串（数据库存储URL为字符串）
-    #         drama_data["cover"] = str(drama_data["cover"]) if isinstance(drama_data["cover"], HttpUrl) else drama_data[
-    #             "cover"]
-    #         drama_data["url"] = str(drama_data["url"]) if isinstance(drama_data["url"], HttpUrl) else drama_data["url"]
-    #
-    #         # Decimal评分转为float（适配MySQL MySQL DECIMAL类型）
-    #         drama_data["score"] = float(drama_data["score"])
-    #
-    #         # 补充自动维护字段（创建/更新时间，统一格式）
-    #         current_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    #         drama_data.update({
-    #             "created_at": current_dt,
-    #             "updated_at": current_dt
-    #         })
-    #
-    #         # 2. 调用MySQL工具类插入数据（表名从DramaModel配置中获取）
-    #         new_drama_id = await mysql_db.insert(
-    #             table=DramaModel.Config.table_name,
-    #             data=drama_data
-    #         )
-    #
-    #         # 3. 插入后查询完整数据，返回DramaModel实例
-    #         return await DramaService.get_drama(drama_id=new_drama_id)
-    #
-    #     except Exception as e:
-    #         logger.error(f"创建剧集失败: {str(e)}")
-    #         return None
 
     @staticmethod
     async def create_drama(drama_in: DramaCreate) -> Optional[DramaModel]:
@@ -88,13 +51,13 @@ class DramaService:
             table_name = DramaModel.Config.table_name
             insert_query = f"""
                 INSERT INTO {table_name} (
-                    title, `desc`, premiere, remark, site, 
+                    category_id, title, `desc`, premiere, remark, site, 
                     cover, score, hot, 
                     douban_film_review, douyin_film_review, xinlang_film_review,
                     kuaishou_film_review, baidu_film_review,
                     url, href, created_at, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s,
                     %s, %s,
@@ -104,6 +67,7 @@ class DramaService:
 
             # 3. 准备参数
             params = (
+                drama_data["category_id"],
                 drama_data["title"],
                 drama_data["desc"],
                 drama_data["premiere"].strftime("%Y-%m-%d"),
@@ -151,7 +115,7 @@ class DramaService:
         try:
             # 构建查询SQL（`desc`为SQL关键字，需用反引号包裹）
             query = f"""
-                SELECT id, title, `desc`, premiere, remark, cover, 
+                SELECT id, category_id, title, `desc`, premiere, remark, cover, 
                        score, hot, douban_film_review, douyin_film_review,
                        xinlang_film_review, kuaishou_film_review, baidu_film_review,
                        site, url, href, created_at, updated_at
@@ -182,6 +146,7 @@ class DramaService:
     async def get_dramas(
             skip: int = 0,
             limit: int = 10,
+            category_id: Optional[int] = None,
             title: Optional[str] = None,
             site: Optional[str] = None,
             min_score: Optional[float] = None,
@@ -192,6 +157,7 @@ class DramaService:
     ) -> DramaList:
         """
         获取剧集列表（支持多条件过滤、排序、分页）
+        :param category_id: 分类id
         :param skip: 分页偏移量（默认0）
         :param limit: 分页大小（默认10）
         :param title: 标题模糊查询（可选）
@@ -208,6 +174,9 @@ class DramaService:
             where_clause = []
             params = []
 
+            if category_id:
+                where_clause.append(f"category_id={category_id}")
+                params.append(f"category_id={category_id}")
             if title:
                 where_clause.append("title LIKE %s")
                 params.append(f"%{title}%")
@@ -237,7 +206,7 @@ class DramaService:
 
             # 查询列表数据
             data_query = f"""
-                SELECT id, title, `desc`, premiere, remark, cover, 
+                SELECT id, category_id, title, `desc`, premiere, remark, cover, 
                        score, hot, douban_film_review, douyin_film_review,
                        xinlang_film_review, kuaishou_film_review, baidu_film_review,
                        site, url, href, created_at, updated_at
@@ -530,56 +499,112 @@ class DramaService:
             logger.error(f"检查标题存在性失败: {str(e)}")
             return False  # 发生错误时默认视为存在，避免重复写入
 
-    async def save_drama_list(self, drama_list: List[Dict[str, Any]], category_id: int, category_name: str):
-        """保存剧集列表到数据库"""
+    async def save_drama_list(self, drama_list: List[Dict[str, Any]], category_id: int, category_name: str) -> Dict[
+        str, int]:
+        """
+        批量保存剧集列表到数据库
+        :param drama_list: 剧集数据列表
+        :param category_id: 分类ID
+        :param category_name: 分类名称
+        :return: 包含成功插入、已存在和失败数量的字典
+        """
+        if not drama_list:
+            logger.info("没有剧集数据需要保存")
+            return {"inserted": 0, "existing": 0, "failed": 0}
+
         # 先获取所有已存在的标题，减少数据库查询次数
         existing_titles = await self._get_existing_titles()
+        current_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        premiere_date = date.today().strftime("%Y-%m-%d")
 
-        try:
-            for index, drama_dict in enumerate(drama_list, 1):
-                title = drama_dict.get("title", f"未知剧_{index}")
+        # 准备批量插入的数据
+        batch_data = []
+        existing_count = 0
 
-                # 检查标题是否已存在
-                if title in existing_titles:
-                    logger.info(f"剧集《{title}》已存在，将跳过写入")
-                    continue
+        for index, drama_dict in enumerate(drama_list, 1):
+            title = drama_dict.get("title", f"未知剧_{index}")
 
-                # 解析链接获取站点信息
-                site = self._extract_site(drama_dict.get('link', ''))
+            # 检查标题是否已存在
+            if title in existing_titles:
+                existing_count += 1
+                logger.debug(f"剧集《{title}》已存在，将跳过写入")
+                continue
 
-                # 构建DramaCreate模型数据
-                drama_data = {
-                    # 基础字段映射
-                    "title": title,
-                    "category_id": category_id,
-                    "desc": f"剧集《{drama_dict.get('title')}》{drama_dict.get('episode')}",
-                    "premiere": date.today(),  # 默认为今天，实际应用中可能需要从其他渠道获取
-                    "remark": drama_dict.get('episode', '未知更新状态'),
-                    "site": site,
+            # 处理URL
+            cover_url = drama_dict.get('image_url')
+            cover_str = str(cover_url) if is_valid_url(cover_url) else ''
 
-                    # 创建模型特有字段
-                    "cover": HttpUrl(drama_dict.get('image_url')),
-                    "score": Decimal("0.0"),  # 初始评分设为0
-                    "hot": 0,  # 用索引作为初始热度值
-                    "douban_film_review": "",
-                    "douyin_film_review": "",
-                    "xinlang_film_review": "",
-                    "kuaishou_film_review": "",
-                    "baidu_film_review": "",
-                    "url": HttpUrl(drama_dict.get('link')),
-                    "href": drama_dict.get('link', '')
-                }
+            url = drama_dict.get('url')
+            url_str = str(url) if is_valid_url(url) else ''
 
-                # 创建模型实例
-                drama_model = DramaCreate(**drama_data)
+            # 处理评分
+            try:
+                score = float(drama_dict.get('score', 0.0))
+            except (ValueError, TypeError):
+                score = 0.0
 
-                # 保存到数据库
-                await self.create_drama(drama_model)
-                logger.info(f"成功保存剧集: {drama_dict.get('title')}")
+            # 构建单条记录数据
+            drama_data = (
+                category_id,
+                title,
+                f"剧集《{drama_dict.get('title')}》{drama_dict.get('episode')}",
+                premiere_date,
+                drama_dict.get('episode', '未知更新状态'),
+                drama_dict.get('site', ''),
+                cover_str,
+                score,
+                0,  # 初始热度值
+                "",  # douban_film_review
+                "",  # douyin_film_review
+                "",  # xinlang_film_review
+                "",  # kuaishou_film_review
+                "",  # baidu_film_review
+                url_str,
+                drama_dict.get('href', ''),
+                current_dt,
+                current_dt
+            )
 
-        except Exception as e:
-            logger.error(f"保存剧集列表到数据库失败: {str(e)}", exc_info=True)
-            raise  # 可选：根据需要决定是否向上抛出异常
+            batch_data.append(drama_data)
+
+        # 执行批量插入
+        inserted_count = 0
+        failed_count = 0
+
+        if batch_data:
+            try:
+                table_name = DramaModel.Config.table_name
+                insert_query = f"""
+                    INSERT INTO {table_name} (
+                        category_id, title, `desc`, premiere, remark, site, 
+                        cover, score, hot, 
+                        douban_film_review, douyin_film_review, xinlang_film_review,
+                        kuaishou_film_review, baidu_film_review,
+                        url, href, created_at, updated_at
+                    ) VALUES (
+                         %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s, %s
+                    )
+                """
+
+                # 执行批量插入
+                result = await mysql_db.execute_many(insert_query, batch_data)
+                inserted_count = result if result is not None else 0
+                logger.info(f"批量插入成功，共插入 {inserted_count} 条剧集数据")
+
+            except Exception as e:
+                logger.error(f"批量插入剧集数据失败: {str(e)}", exc_info=True)
+                failed_count = len(batch_data)
+
+        logger.info(f"====category_id: {category_id} -- category_name: {category_name} -- inserted: {inserted_count} -- existing: {existing_count} -- failed: {failed_count}")
+        return {
+            "inserted": inserted_count,
+            "existing": existing_count,
+            "failed": failed_count
+        }
 
     @staticmethod
     async def _get_existing_titles() -> set:
@@ -591,15 +616,6 @@ class DramaService:
         except Exception as e:
             logger.error(f"获取已存在标题列表失败: {str(e)}")
             return set()
-
-    def _extract_site(self, url: str) -> str:
-        """从URL中提取站点信息"""
-        try:
-            from urllib.parse import urlparse
-            parsed_url = urlparse(url)
-            return parsed_url.netloc.split('.')[-2] if parsed_url.netloc else "unknown"
-        except Exception:
-            return "unknown"
 
 
 # 创建service实例

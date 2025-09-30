@@ -37,6 +37,7 @@ class DramaCreate(DramaBase):
 
 # 更新模型 - 用于部分更新数据
 class DramaUpdate(BaseModel):
+    category_id: Optional[int] = Field(None, ge=0, description="分类id")
     title: Optional[str] = Field(None, max_length=255, description="剧名称")
     desc: Optional[str] = Field(None, max_length=255, description="简介")
     premiere: Optional[date] = Field(None, description="首映时间")

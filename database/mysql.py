@@ -2,7 +2,7 @@ import logging
 import aiomysql
 from contextlib import asynccontextmanager
 from config.settings import settings
-from typing import AsyncGenerator, Optional, Any
+from typing import AsyncGenerator, Optional, Any, List
 from functools import wraps
 
 # 配置日志
@@ -82,6 +82,28 @@ class MySQLDatabase:
             if query.strip().upper().startswith('SELECT'):
                 return await cursor.fetchall()
             return cursor.lastrowid
+
+    async def execute_many(self, query: str, params_list: List[Any], dict_cursor: bool = False) -> int:
+        """
+        批量执行SQL语句
+
+        :param query: SQL查询语句，使用%s作为占位符
+        :param params_list: 参数列表，每个元素是一个元组或字典，对应一条记录的参数
+        :param dict_cursor: 是否使用字典游标，批量插入通常不需要，默认False
+        :return: 受影响的行数
+        """
+        if not params_list:
+            return 0  # 空列表直接返回0
+
+        async with self.get_cursor(dict_cursor) as cursor:
+            try:
+                # 执行批量操作
+                await cursor.executemany(query, params_list)
+                # 返回受影响的行数
+                return cursor.rowcount
+            except Exception as e:
+                logger.error(f"批量执行SQL失败: {str(e)}")
+                raise  # 重新抛出异常，让调用者处理
 
     async def fetch_one(self, query: str, params: Any = None, dict_cursor: bool = True):
         """执行SQL查询并返回单条结果"""

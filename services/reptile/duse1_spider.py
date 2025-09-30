@@ -42,6 +42,7 @@ class Duse1Spider:
         self.banners = []  # 存储banner信息
         self.visited_urls = set()  # 已访问的URL集合
         self.task_timeout = 300  # 5分钟超时
+        self.crawled_urls = set()  # 用于记录已爬取的分类URL，避免重复请求
 
     async def init_session(self):
         """初始化aiohttp会话"""
@@ -899,20 +900,41 @@ class Duse1Spider:
         """
         爬取分类下的剧列表数据
         """
-        # 用于记录已爬取的分类URL，避免重复请求
-        crawled_urls = set()
+        ids = [50, 46, 47, 48, 49]
+        parent_ids = []
+        for i in ids:
+            # 获取分类列表-1级
+            categories = await category_service.get_by_parent_id(parent_id=i)
+            if not categories:
+                logger.error("未找到任何分类，爬虫停止")
+                continue
 
-        # 获取分类列表
-        categories = await category_service.get_by_parent_id(parent_id=197)
+            for category in categories:
+                parent_ids.append(category.id)
+
+            # 3级分类的剧列表写入
+            for parent_id in parent_ids:
+                await self.send_queue(parent_id)
+
+            # 2级分类的剧列表写入
+            await self.send_queue(i)
+
+        return []
+
+    async def send_queue(self, parent_id: int):
+        """循环数据发送队列"""
+        # 获取分类列表-2级
+        categories = await category_service.get_by_parent_id(parent_id=parent_id)
         if not categories:
             logger.error("未找到任何分类，爬虫停止")
             return
 
         # 爬取每个分类下的剧列表
-        drama_lists = []
+        # drama_lists = []
+
         for category in categories:
             # 检查当前URL是否已爬取过
-            if category.url in crawled_urls:
+            if category.url in self.crawled_urls:
                 logger.info(f"URL {category.url} 已爬取过，将跳过")
                 continue
 
@@ -920,7 +942,7 @@ class Duse1Spider:
             drama_list = await self.get_category_drama_list(category.url)
             if not drama_list:
                 continue
-            drama_lists.append(drama_list)
+            # drama_lists.append(drama_list)
 
             # 发送到Kafka
             await kafka_producer.send_message(
@@ -936,31 +958,29 @@ class Duse1Spider:
             )
 
             # 将已处理的URL加入集合
-            crawled_urls.add(category.url)
+            self.crawled_urls.add(category.url)
 
             logger.info(f"爬取分类: {category.name} 结束")
-        return drama_lists
 
     async def get_category_drama_list(self, category_url: str) -> List[Dict[str, str]]:
         """获取分类下的剧列表"""
         url = get_left_part_of_valid_url(category_url)
-        logging.info(f"分类URL: {category_url}，url: {url}")
+        # logging.info(f"分类URL: {category_url}，url: {url}")
         if not url:
             drama_list = await self.get_category_drama_list_html(category_url)
             return drama_list
         else:
             drama_list = []
             for i in range(20):
-                drama_list_page = await self.get_category_drama_list_html(f"{url}{i+1}.html")
+                drama_list_page = await self.get_category_drama_list_html(f"{url}{i + 1}.html")
                 if not drama_list_page:
                     continue
                 drama_list.extend(drama_list_page)
             return drama_list
 
-
     async def get_category_drama_list_html(self, category_url: str) -> List[Dict[str, str]]:
         """爬取分类页信息"""
-        logger.info(f"开始获取分类: {category_url} 下的剧列表信息")
+        # logger.info(f"开始获取分类: {category_url} 下的剧列表信息")
         html_content = await self.fetch_url(category_url)
         if not html_content:
             logger.error("获取分类内容失败")
@@ -997,18 +1017,38 @@ class Duse1Spider:
                 episode_tag = item.find('div', class_='v-item-bottom').find('span')
                 episode = episode_tag.get_text(strip=True) if episode_tag else ''
 
+                # 提取评分
+                score_tag = item.find('div', class_='v-item-top-left').find('span')
+                score = 0.0  # 默认值设为0.0（浮点类型）
+                if score_tag:
+                    score_text = score_tag.get_text(strip=True)
+                    # 提取数字部分
+                    import re
+                    match = re.search(r'(\d+\.\d+)', score_text)
+                    if match:
+                        try:
+                            score = float(match.group(1))
+                        except ValueError:
+                            logger.debug(f"score error: {score_text}")
+                    else:
+                        logger.debug(f"无法从 {score_text} 中提取评分")
+
                 # 存储到结果列表
                 results.append({
                     'title': title,
-                    'link': self.base_url + link,
-                    'image_url': self.base_img_url + img_url,
-                    'episode': episode
+                    'site': self.base_url,
+                    'url': self.base_url + link,
+                    'href': link,
+                    'image_url': self.base_img_url + img_url if img_url else '',
+                    'episode': episode,
+                    'score': score
                 })
 
             return results
         except Exception as e:
             logger.error(f"爬取分类: {category_url} 下的剧列表失败: {str(e)}")
             return []
+
 
 # 创建全局实例
 duse1_spider = Duse1Spider()

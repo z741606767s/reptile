@@ -116,7 +116,21 @@ class KafkaProducer:
         try:
             # 获取现有主题
             cluster_metadata = await self.admin_client.describe_topics()
-            existing_topics = set(cluster_metadata.keys())
+
+            # 从元数据中提取主题名称
+            # 不同版本的aiokafka返回格式可能不同，这里做兼容处理
+            existing_topics = set()
+            if isinstance(cluster_metadata, dict) and 'topics' in cluster_metadata:
+                # 较新版本的返回格式
+                existing_topics = {topic['topic'] for topic in cluster_metadata['topics']}
+            else:
+                # 旧版本可能直接返回主题列表
+                # 处理可能的列表情况，无论是字符串还是字典
+                for item in cluster_metadata:
+                    if isinstance(item, dict) and 'topic' in item:
+                        existing_topics.add(item['topic'])
+                    elif isinstance(item, str):
+                        existing_topics.add(item)
 
             # 找出不存在的主题
             missing_topics = set(topic_names) - existing_topics
@@ -142,7 +156,7 @@ class KafkaProducer:
                 except Exception as e:
                     logger.error(f"创建主题失败: {e}")
         except Exception as e:
-            logger.error(f"检查主题存在性时出错: {e}")
+            logger.error(f"检查主题存在性时出错1: {e}")
 
     async def create_topic_if_not_exists(self, topic_name: str, partitions=1, replication_factor=1):
         """如果主题不存在则创建"""

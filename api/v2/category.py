@@ -61,7 +61,7 @@ async def read_categories(
     )
 
 @router.get("/list", response_model=ResponseModel)
-async def read_category_list( parent_id: Optional[int] = None):
+async def read_category_list(parent_id: Optional[int] = None):
     """获取分类列表"""
     logging.info(f"获取分类列表，parent_id: {parent_id}")
     data = await CategoryService.get_by_parent_id(parent_id)

@@ -91,12 +91,15 @@ async def register_kafka_handlers():
         """处理 CRAWL_DRAMA_LIST 消息"""
         try:
             # 这里可以添加处理逻辑，例如发送通知、更新缓存等
-            logger.info(f"处理 CRAWL_DRAMA_LIST 消息: {message}")
+            # logger.info(f"处理 CRAWL_DRAMA_LIST 消息: {message}")
 
             # 示例：保存到数据库
             data = message.get('data')
+            category_id = message.get('category_id')
+            category_name = message.get('category_name')
+
             if data:
-                await drama_service.save_drama_list(data, message.get('category_id'),message.get('category_name'))
+                await drama_service.save_drama_list(drama_list=data, category_id=category_id, category_name=category_name)
 
         except Exception as e:
             logger.error(f"处理 CRAWL_DRAMA_LIST 消息时出错: {e}")
