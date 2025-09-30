@@ -113,6 +113,20 @@ async def start_crawl_dushe1_type():
             message=f"爬虫任务失败: {str(e)}"
         )
 
+@router.post("/crawl/dushe1/drama_list")
+async def start_crawl_dushe1_drama_list():
+    """启动爬虫抓取分类下的剧列表"""
+    try:
+        result = await duse1_spider.crawl_drama_list()
+        return response_util.success(
+            data=result,
+            message="爬虫任务成功"
+        )
+    except Exception as e:
+        return response_util.error(
+            message=f"爬虫任务失败: {str(e)}"
+        )
+
 
 def traverse_tree(node, depth=0):
     # 打印当前节点的信息，使用缩进表示层级

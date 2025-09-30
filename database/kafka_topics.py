@@ -17,6 +17,7 @@ class KafkaTopic(str, Enum):
     AUDIT_LOG = "audit_log"  # 审计日志
     CRAWL_RESULTS = "crawl_results"  # 爬取结果
     CRAWL_LEVEL_RESULTS = "crawl_level_results"  # 爬取顶级分类的子类
+    CRAWL_DRAMA_LIST = "crawl_drama_list"  # 爬取 drama 列表
 
     def with_prefix(self, prefix: str = "fastapi_"):
         """为主题添加前缀"""

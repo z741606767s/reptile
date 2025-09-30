@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Coroutine
 from config import settings
 from database.mysql import mysql_db
 from models import CategoryModel
@@ -92,6 +92,22 @@ class CategoryService(object):
             return CategoryModel(**result) if result else None
         except Exception as e:
             logger.error(f"根据slug获取分类失败: {e}")
+            return None
+
+    @staticmethod
+    async def get_by_parent_id(parent_id: Optional[int]) -> list[CategoryModel] | None:
+        """根据parent_id获取分类"""
+        try:
+            if parent_id is None:
+                query = "SELECT * FROM r_category WHERE parent_id IS NULL"
+                params = []
+            else:
+                query = "SELECT * FROM r_category WHERE parent_id = %s"
+                params = [parent_id]
+            results = await mysql_db.fetch_all(query, params)
+            return [CategoryModel(**result) for result in results]
+        except Exception as e:
+            logger.error(f"根据parent_id获取分类失败: {e}")
             return None
 
     @staticmethod

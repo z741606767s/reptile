@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
 from schemas import (
@@ -8,6 +9,13 @@ from schemas import (
 )
 from schemas.base import ResponseModel, ListResponseModel, ErrorResponseModel
 from services import CategoryService
+from config import settings
+
+# 配置日志
+logging.basicConfig(level=settings.LOG_LEVEL,
+                    format=settings.LOG_FORMAT,
+                    datefmt=settings.LOG_DATE_FORMAT)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -52,6 +60,14 @@ async def read_categories(
         data=categories
     )
 
+@router.get("/list", response_model=ResponseModel)
+async def read_category_list( parent_id: Optional[int] = None):
+    """获取分类列表"""
+    logging.info(f"获取分类列表，parent_id: {parent_id}")
+    data = await CategoryService.get_by_parent_id(parent_id)
+    return ResponseModel(
+        data=data
+    )
 
 @router.get("/{category_id}", response_model=ResponseModel)
 async def read_category(category_id: int):

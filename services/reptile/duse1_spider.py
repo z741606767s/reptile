@@ -4,7 +4,7 @@ import os
 import aiofiles
 import aiohttp
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Coroutine
 from datetime import datetime
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -15,8 +15,10 @@ from config import settings
 from database.mysql import mysql_db
 from database.kafka_producer import kafka_producer
 from database.kafka_topics import KafkaTopic
+from models import CategoryModel
 from services.category import category_service
 from services.translate import Translate
+from utils.tool.tools import get_left_part_of_valid_url
 
 # 配置日志
 logging.basicConfig(level=settings.LOG_LEVEL,
@@ -35,7 +37,7 @@ class Duse1Spider:
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15"
         ]
         self.base_url = "https://www.duse1.com"
-        self.base_img_url = "https://vres.cfaqcgj.com/"
+        self.base_img_url = "https://vres.cfaqcgj.com"
         self.categories = []  # 存储分类信息
         self.banners = []  # 存储banner信息
         self.visited_urls = set()  # 已访问的URL集合
@@ -893,6 +895,120 @@ class Duse1Spider:
         finally:
             await self.close_session()
 
+    async def crawl_drama_list(self):
+        """
+        爬取分类下的剧列表数据
+        """
+        # 用于记录已爬取的分类URL，避免重复请求
+        crawled_urls = set()
+
+        # 获取分类列表
+        categories = await category_service.get_by_parent_id(parent_id=197)
+        if not categories:
+            logger.error("未找到任何分类，爬虫停止")
+            return
+
+        # 爬取每个分类下的剧列表
+        drama_lists = []
+        for category in categories:
+            # 检查当前URL是否已爬取过
+            if category.url in crawled_urls:
+                logger.info(f"URL {category.url} 已爬取过，将跳过")
+                continue
+
+            logger.info(f"开始爬取分类: {category.name}")
+            drama_list = await self.get_category_drama_list(category.url)
+            if not drama_list:
+                continue
+            drama_lists.append(drama_list)
+
+            # 发送到Kafka
+            await kafka_producer.send_message(
+                KafkaTopic.CRAWL_DRAMA_LIST,
+                {
+                    'type': 'crawl_drama_list',
+                    'url': self.base_url,
+                    'category_id': category.id,
+                    'category_name': category.name,
+                    'data': drama_list,
+                    'timestamp': datetime.now().isoformat()
+                }
+            )
+
+            # 将已处理的URL加入集合
+            crawled_urls.add(category.url)
+
+            logger.info(f"爬取分类: {category.name} 结束")
+        return drama_lists
+
+    async def get_category_drama_list(self, category_url: str) -> List[Dict[str, str]]:
+        """获取分类下的剧列表"""
+        url = get_left_part_of_valid_url(category_url)
+        logging.info(f"分类URL: {category_url}，url: {url}")
+        if not url:
+            drama_list = await self.get_category_drama_list_html(category_url)
+            return drama_list
+        else:
+            drama_list = []
+            for i in range(20):
+                drama_list_page = await self.get_category_drama_list_html(f"{url}{i+1}.html")
+                if not drama_list_page:
+                    continue
+                drama_list.extend(drama_list_page)
+            return drama_list
+
+
+    async def get_category_drama_list_html(self, category_url: str) -> List[Dict[str, str]]:
+        """爬取分类页信息"""
+        logger.info(f"开始获取分类: {category_url} 下的剧列表信息")
+        html_content = await self.fetch_url(category_url)
+        if not html_content:
+            logger.error("获取分类内容失败")
+            return []
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        try:
+            # 找到所有的module-item
+            module_items = soup.find_all('div', class_='module-item')
+
+            # 若不存在module-item标签，直接返回空列表
+            if not module_items:
+                logger.info(f"分类: {category_url} 下未找到module-item标签，无需提取数据")
+                return []
+
+            # 存储提取的信息
+            results = []
+
+            for item in module_items:
+                # 提取链接
+                link_tag = item.find('a', class_='v-item')
+                link = link_tag['href'] if link_tag else ''
+
+                # 提取标题
+                title_tag = item.find('div', class_='v-item-footer').find('div', class_='v-item-title', style=None)
+                title = title_tag.get_text(strip=True) if title_tag else ''
+
+                # 提取封面图片URL（data-original属性）
+                img_tag = item.find('div', class_='v-item-cover').find_all('img')[1]  # 第二个img是实际封面
+                img_url = img_tag.get('data-original', '') if img_tag else ''
+
+                # 提取集数信息
+                episode_tag = item.find('div', class_='v-item-bottom').find('span')
+                episode = episode_tag.get_text(strip=True) if episode_tag else ''
+
+                # 存储到结果列表
+                results.append({
+                    'title': title,
+                    'link': self.base_url + link,
+                    'image_url': self.base_img_url + img_url,
+                    'episode': episode
+                })
+
+            return results
+        except Exception as e:
+            logger.error(f"爬取分类: {category_url} 下的剧列表失败: {str(e)}")
+            return []
 
 # 创建全局实例
 duse1_spider = Duse1Spider()

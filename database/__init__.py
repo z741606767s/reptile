@@ -1,3 +1,4 @@
+from services.drama import drama_service
 from services.category import category_service
 from services.reptile import reptile_service
 from .kafka_consumer import kafka_consumer
@@ -86,6 +87,20 @@ async def register_kafka_handlers():
         except Exception as e:
             logger.error(f"处理 CRAWL_LEVEL_RESULTS 消息时出错: {e}")
 
+    async def handle_crawl_drama_list(message):
+        """处理 CRAWL_DRAMA_LIST 消息"""
+        try:
+            # 这里可以添加处理逻辑，例如发送通知、更新缓存等
+            logger.info(f"处理 CRAWL_DRAMA_LIST 消息: {message}")
+
+            # 示例：保存到数据库
+            data = message.get('data')
+            if data:
+                await drama_service.save_drama_list(data, message.get('category_id'),message.get('category_name'))
+
+        except Exception as e:
+            logger.error(f"处理 CRAWL_DRAMA_LIST 消息时出错: {e}")
+
     # 注册处理器
     kafka_consumer.register_handler(KafkaTopic.ITEM_CREATED, handle_item_created)
     kafka_consumer.register_handler(KafkaTopic.USER_CREATED, handle_user_created)
@@ -93,5 +108,6 @@ async def register_kafka_handlers():
     kafka_consumer.register_handler(KafkaTopic.AUDIT_LOG, handle_audit_log)
     kafka_consumer.register_handler(KafkaTopic.CRAWL_RESULTS, handle_crawl_results)
     kafka_consumer.register_handler(KafkaTopic.CRAWL_LEVEL_RESULTS, handle_crawl_level_results)
+    kafka_consumer.register_handler(KafkaTopic.CRAWL_DRAMA_LIST, handle_crawl_drama_list)
 
     logger.info("Kafka消息处理器注册完成")

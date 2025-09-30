@@ -125,6 +125,61 @@ class VideoDownloader:
                 ts_filename = os.path.join(output_path, f'segment_{i:04d}.ts')
                 ts_files.append(ts_filename)
 
+                self.download_m3u82(ts_url, title, output_path)
+
+            #     if not os.path.exists(ts_filename):
+            #         print(f"下载片段 {i + 1}/{len(ts_list)}: {ts_url}")
+            #         ts_response = self.session.get(ts_url, stream=True)
+            #         with open(ts_filename, 'wb') as f:
+            #             for chunk in ts_response.iter_content(chunk_size=8192):
+            #                 f.write(chunk)
+            #     else:
+            #         print(f"片段 {i + 1}/{len(ts_list)} 已存在，跳过下载")
+            #
+            # # 合并ts文件
+            # output_file = os.path.join(output_path, f"{title}.mp4")
+            # self.merge_ts_files(ts_files, output_file)
+            #
+            # print(f"视频已保存到: {output_file}")
+            return True
+
+        except Exception as e:
+            print(f"下载m3u8视频时出错: {e}")
+            return False
+
+    def download_m3u82(self, m3u8_url, title, output_path=None):
+        """下载m3u8视频"""
+        try:
+            print(f"尝试下载m3u8视频: {m3u8_url}")
+
+            # 获取m3u8内容
+            response = self.session.get(m3u8_url)
+            response.raise_for_status()
+
+            # 解析m3u8文件
+            lines = response.text.split('\n')
+            ts_list = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
+
+            if not ts_list:
+                print("m3u8文件中没有找到ts片段")
+                return False
+
+            # 确定输出目录和文件名
+            if not output_path:
+                output_path = os.path.join(os.getcwd(), title)
+            os.makedirs(output_path, exist_ok=True)
+
+            # 下载所有ts片段
+            ts_files = []
+            for i, ts_url in enumerate(ts_list):
+                # 处理相对URL
+                if not ts_url.startswith('http'):
+                    base_url = '/'.join(m3u8_url.split('/')[:-1])
+                    ts_url = urljoin(base_url + '/', ts_url)
+
+                ts_filename = os.path.join(output_path, f'segment_{i:04d}.ts')
+                ts_files.append(ts_filename)
+
                 if not os.path.exists(ts_filename):
                     print(f"下载片段 {i + 1}/{len(ts_list)}: {ts_url}")
                     ts_response = self.session.get(ts_url, stream=True)
